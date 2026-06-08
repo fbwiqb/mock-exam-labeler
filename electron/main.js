@@ -1,4 +1,5 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require("electron");
+const { execFile } = require("child_process");
 const fs = require("fs/promises");
 const path = require("path");
 
@@ -38,6 +39,18 @@ function dataUrlToBuffer(dataUrl) {
   return Buffer.from(dataUrl.slice(comma + 1), "base64");
 }
 
+function runPowerShell(command) {
+  return new Promise((resolve) => {
+    execFile("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command], { windowsHide: true }, (error, stdout) => {
+      if (error) {
+        resolve("");
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
 app.whenReady().then(createWindow);
 
 app.on("window-all-closed", () => {
@@ -67,6 +80,35 @@ ipcMain.handle("open-image", async () => {
     fileName: path.basename(filePath, path.extname(filePath)),
     dataUrl: `data:${mime};base64,${buffer.toString("base64")}`
   };
+});
+
+ipcMain.handle("get-system-fonts", async () => {
+  const command = `
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+    $OutputEncoding = [Console]::OutputEncoding
+    $paths = @(
+      'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts',
+      'HKCU:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts'
+    )
+    $names = foreach ($path in $paths) {
+      if (Test-Path $path) {
+        (Get-ItemProperty $path).PSObject.Properties |
+          Where-Object { $_.Name -notmatch '^PS' } |
+          ForEach-Object {
+            $_.Name -replace '\\s*\\((TrueType|OpenType|PostScript|Type 1)\\)\\s*$', '' -replace '\\s*&\\s*.+$', ''
+          }
+      }
+    }
+    $names | Where-Object { $_ -and $_.Trim() } | Sort-Object -Unique | ConvertTo-Json -Compress
+  `;
+  const stdout = await runPowerShell(command);
+
+  try {
+    const parsed = JSON.parse(stdout.trim() || "[]");
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch (_error) {
+    return [];
+  }
 });
 
 ipcMain.handle("open-project", async () => {

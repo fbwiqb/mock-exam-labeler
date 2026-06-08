@@ -14,6 +14,7 @@
         <span id="fileName">이미지를 열어 시작하세요</span>
       </div>
       <div class="header-actions">
+        <button id="helpBtn">사용법</button>
         <button id="openImageBtn">이미지 열기</button>
         <button id="openProjectBtn">프로젝트 열기</button>
         <button id="saveProjectBtn">프로젝트 저장(.melp)</button>
@@ -29,7 +30,7 @@
           <div class="preset-grid" id="presetGrid"></div>
           <div class="button-grid">
             <button id="addCenterBtn">가운데</button>
-            <button id="addModeBtn">클릭 추가</button>
+            <button id="addModeBtn">지시선 추가</button>
           </div>
         </section>
 
@@ -46,10 +47,6 @@
                 <option value="Times New Roman, serif">Times New Roman</option>
                 <option value="Cambria, serif">Cambria</option>
               </select>
-            </label>
-            <label>
-              직접 글꼴
-              <input id="customFont" type="text" placeholder="KoPubWorld돋움체" autocomplete="off">
             </label>
             <label>
               글자 크기
@@ -188,10 +185,7 @@
               <input id="leaderY" type="number" step="1">
             </label>
           </div>
-          <div class="button-grid">
-            <button id="leaderModeBtn">끝점 드래그</button>
-            <button id="leaderClearBtn">제거</button>
-          </div>
+          <button id="leaderClearBtn" class="wide">지시선 제거</button>
         </section>
       </aside>
     </main>
@@ -202,6 +196,22 @@
       <canvas id="magnifierCanvas" width="240" height="150"></canvas>
       <div id="magnifierMeta" class="magnifier-meta">0, 0</div>
     </div>
+    <dialog id="helpDialog">
+      <div class="help">
+        <header>
+          <h2>사용법</h2>
+          <button id="helpCloseBtn">닫기</button>
+        </header>
+        <ol>
+          <li><strong>이미지 열기</strong>로 PNG/JPG를 불러옵니다.</li>
+          <li><strong>지시선 추가</strong>를 켜고, 그림에서 가리킬 지점을 누른 채 라벨을 둘 곳까지 드래그합니다.</li>
+          <li>라벨은 드래그해 옮기고, 지시선 끝점은 작은 핸들을 잡아 미세 조정합니다.</li>
+          <li>드래그 중 루페가 나타나 픽셀 위치를 확대해서 보여줍니다.</li>
+          <li>나중에 다시 수정하려면 <strong>프로젝트 저장(.melp)</strong>을 저장하고, 다음에는 PNG가 아니라 `.melp`를 엽니다.</li>
+          <li>시험지나 PPT에는 <strong>라벨 포함/없음 저장</strong>으로 만든 PNG 두 장을 사용합니다.</li>
+        </ol>
+      </div>
+    </dialog>
     <script src="./renderer.js"></script>
   </body>
 </html>

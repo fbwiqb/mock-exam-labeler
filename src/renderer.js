@@ -16,7 +16,6 @@ const els = {
   addModeBtn: document.getElementById("addModeBtn"),
   applyStyleAllBtn: document.getElementById("applyStyleAllBtn"),
   fontFamily: document.getElementById("fontFamily"),
-  customFont: document.getElementById("customFont"),
   fontSize: document.getElementById("fontSize"),
   fontSizeValue: document.getElementById("fontSizeValue"),
   labelPadding: document.getElementById("labelPadding"),
@@ -46,13 +45,15 @@ const els = {
   leaderGapValue: document.getElementById("leaderGapValue"),
   leaderX: document.getElementById("leaderX"),
   leaderY: document.getElementById("leaderY"),
-  leaderModeBtn: document.getElementById("leaderModeBtn"),
   leaderClearBtn: document.getElementById("leaderClearBtn"),
   magnifier: document.getElementById("magnifier"),
   magnifierCanvas: document.getElementById("magnifierCanvas"),
   magnifierSize: document.getElementById("magnifierSize"),
   magnifierMeta: document.getElementById("magnifierMeta"),
-  fileDropInput: document.getElementById("fileDropInput")
+  fileDropInput: document.getElementById("fileDropInput"),
+  helpBtn: document.getElementById("helpBtn"),
+  helpDialog: document.getElementById("helpDialog"),
+  helpCloseBtn: document.getElementById("helpCloseBtn")
 };
 
 const presets = ["(가)", "(나)", "(다)", "(라)", "A", "B", "C", "D", "㉠", "㉡", "㉢", "㉣", "①", "②", "③", "④"];
@@ -86,8 +87,43 @@ function quoteFontFamily(font) {
 }
 
 function resolveFontFamily() {
-  const custom = els.customFont.value.trim();
-  return custom ? quoteFontFamily(custom) : els.fontFamily.value;
+  return els.fontFamily.value || "Batang, serif";
+}
+
+function appendFontOption(value, label) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  els.fontFamily.appendChild(option);
+}
+
+async function populateFonts() {
+  const fixedFonts = [
+    ["Batang, serif", "바탕"],
+    ["\"Malgun Gothic\", \"Segoe UI\", sans-serif", "맑은 고딕"],
+    ["Gulim, sans-serif", "굴림"],
+    ["Arial, sans-serif", "Arial"],
+    ["Times New Roman, serif", "Times New Roman"],
+    ["Cambria, serif", "Cambria"]
+  ];
+  const seen = new Set();
+  els.fontFamily.innerHTML = "";
+
+  for (const [value, label] of fixedFonts) {
+    appendFontOption(value, label);
+    seen.add(label.toLowerCase());
+  }
+
+  try {
+    const fonts = await window.labeler.getSystemFonts();
+    for (const font of fonts) {
+      const name = String(font || "").trim();
+      if (!name || seen.has(name.toLowerCase())) continue;
+      appendFontOption(quoteFontFamily(name), name);
+      seen.add(name.toLowerCase());
+    }
+  } catch (_error) {
+  }
 }
 
 function labelFont(label) {
@@ -311,13 +347,29 @@ function makeLabel(x, y, text) {
   };
 }
 
+function makeLeaderLabel(startX, startY, endX, endY, text) {
+  const label = makeLabel(Math.round(endX), Math.round(endY), text);
+  label.leader = {
+    ...defaultLeader(),
+    ...leaderStyleFromControls(),
+    enabled: true,
+    x: Math.round(startX),
+    y: Math.round(startY)
+  };
+  return label;
+}
+
+function setAddMode(active) {
+  state.mode = active ? "add" : "select";
+  els.addModeBtn.textContent = active ? "추가 중" : "지시선 추가";
+}
+
 function addLabelAt(x, y, text) {
   if (!state.image) return;
   const label = makeLabel(Math.round(x), Math.round(y), text);
   state.labels.push(label);
   state.selectedId = label.id;
-  state.mode = "select";
-  els.addModeBtn.textContent = "클릭해서 추가";
+  setAddMode(false);
   render();
 }
 
@@ -425,7 +477,6 @@ function updateInspector() {
   els.leaderGap.disabled = disabled;
   els.leaderX.disabled = disabled;
   els.leaderY.disabled = disabled;
-  els.leaderModeBtn.disabled = disabled;
   els.leaderClearBtn.disabled = disabled;
 
   if (!label) {
@@ -463,8 +514,7 @@ function updateInspector() {
   els.leaderGapValue.textContent = String(leader.gap);
   els.leaderX.value = leader.enabled ? Math.round(leader.x) : "";
   els.leaderY.value = leader.enabled ? Math.round(leader.y) : "";
-  els.customFont.value = label.customFont || "";
-  if (!label.customFont && label.fontFamily) {
+  if (label.fontFamily) {
     const option = Array.from(els.fontFamily.options).find((item) => item.value === label.fontFamily);
     if (option) els.fontFamily.value = label.fontFamily;
   }
@@ -632,14 +682,25 @@ els.saveProjectBtn.addEventListener("click", async () => {
 
 els.exportPairBtn.addEventListener("click", exportPair);
 
+els.helpBtn.addEventListener("click", () => {
+  els.helpDialog.showModal();
+});
+
+els.helpCloseBtn.addEventListener("click", () => {
+  els.helpDialog.close();
+});
+
+els.helpDialog.addEventListener("click", (event) => {
+  if (event.target === els.helpDialog) els.helpDialog.close();
+});
+
 els.addCenterBtn.addEventListener("click", () => {
   if (!state.image) return;
   addLabelAt(state.image.naturalWidth / 2 - 22, state.image.naturalHeight / 2 - 18);
 });
 
 els.addModeBtn.addEventListener("click", () => {
-  state.mode = state.mode === "add" ? "select" : "add";
-  els.addModeBtn.textContent = state.mode === "add" ? "추가 모드 중" : "클릭해서 추가";
+  setAddMode(state.mode !== "add");
 });
 
 els.fontSize.addEventListener("input", () => {
@@ -665,7 +726,6 @@ function labelStyleFromControls() {
     fontSize: Number(els.fontSize.value),
     padding: Number(els.labelPadding.value),
     fontFamily: resolveFontFamily(),
-    customFont: els.customFont.value.trim(),
     color: els.textColor.value,
     background: els.labelBackground.value,
     bold: els.boldText.checked,
@@ -684,7 +744,7 @@ function leaderStyleFromControls() {
   };
 }
 
-for (const control of [els.fontFamily, els.customFont, els.textColor, els.labelBackground, els.boldText, els.italicText, els.underlineText, els.outlineText]) {
+for (const control of [els.fontFamily, els.textColor, els.labelBackground, els.boldText, els.italicText, els.underlineText, els.outlineText]) {
   control.addEventListener("input", () => {
     const label = selectedLabel();
     if (!label) return;
@@ -741,23 +801,12 @@ for (const control of [els.leaderEnabled, els.leaderShape, els.leaderStyle, els.
   control.addEventListener("input", updateLeaderFromControls);
 }
 
-els.leaderModeBtn.addEventListener("click", () => {
-  const label = selectedLabel();
-  if (!label) return;
-  const leader = normalizedLeader(label);
-  label.leader = { ...leader, enabled: true };
-  els.leaderEnabled.checked = true;
-  state.mode = state.mode === "leader" ? "select" : "leader";
-  els.leaderModeBtn.textContent = state.mode === "leader" ? "지시선 드래그 중" : "지시선 위치 드래그";
-  render();
-});
-
 els.leaderClearBtn.addEventListener("click", () => {
   const label = selectedLabel();
   if (!label) return;
   label.leader = { ...normalizedLeader(label), enabled: false };
   state.mode = "select";
-  els.leaderModeBtn.textContent = "지시선 위치 드래그";
+  setAddMode(false);
   render();
 });
 
@@ -811,25 +860,15 @@ canvas.addEventListener("pointerdown", (event) => {
   const point = getCanvasPoint(event);
 
   if (state.mode === "add") {
-    addLabelAt(point.x, point.y);
+    const label = makeLeaderLabel(point.x, point.y, point.x + 48, point.y - 22);
+    state.labels.push(label);
+    state.selectedId = label.id;
+    const bounds = labelBounds(label);
+    state.dragging = { type: "new-label", id: label.id, offsetX: bounds.width / 2, offsetY: bounds.height / 2 };
+    canvas.setPointerCapture(event.pointerId);
+    render();
+    showMagnifier(event, point);
     return;
-  }
-
-  if (state.mode === "leader") {
-    const label = selectedLabel();
-    if (label) {
-      label.leader = {
-        ...normalizedLeader(label),
-        enabled: true,
-        x: Math.round(point.x),
-        y: Math.round(point.y)
-      };
-      state.dragging = { type: "leader", id: label.id };
-      canvas.setPointerCapture(event.pointerId);
-      render();
-      showMagnifier(event, point);
-      return;
-    }
   }
 
   const leaderHit = hitLeader(point);
@@ -877,10 +916,7 @@ canvas.addEventListener("pointermove", (event) => {
 });
 
 canvas.addEventListener("pointerup", (event) => {
-  if (state.dragging?.type === "leader" && state.mode === "leader") {
-    state.mode = "select";
-    els.leaderModeBtn.textContent = "지시선 위치 드래그";
-  }
+  if (state.dragging?.type === "new-label") setAddMode(false);
   state.dragging = null;
   hideMagnifier();
   try {
@@ -950,3 +986,4 @@ window.addEventListener("resize", () => {
 });
 
 render();
+populateFonts().then(() => render());

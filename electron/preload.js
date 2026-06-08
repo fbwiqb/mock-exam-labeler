@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("labeler", {
+  getSystemFonts: () => ipcRenderer.invoke("get-system-fonts"),
   openImage: () => ipcRenderer.invoke("open-image"),
   openProject: () => ipcRenderer.invoke("open-project"),
   saveProject: (payload) => ipcRenderer.invoke("save-project", payload),
