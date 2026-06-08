@@ -10,13 +10,11 @@ const els = {
   openProjectBtn: document.getElementById("openProjectBtn"),
   saveProjectBtn: document.getElementById("saveProjectBtn"),
   exportPairBtn: document.getElementById("exportPairBtn"),
-  exportLabeledBtn: document.getElementById("exportLabeledBtn"),
-  exportBlankBtn: document.getElementById("exportBlankBtn"),
-  exportLabelsOnlyBtn: document.getElementById("exportLabelsOnlyBtn"),
   labelText: document.getElementById("labelText"),
   presetGrid: document.getElementById("presetGrid"),
   addCenterBtn: document.getElementById("addCenterBtn"),
   addModeBtn: document.getElementById("addModeBtn"),
+  applyStyleAllBtn: document.getElementById("applyStyleAllBtn"),
   fontFamily: document.getElementById("fontFamily"),
   customFont: document.getElementById("customFont"),
   fontSize: document.getElementById("fontSize"),
@@ -302,20 +300,13 @@ function fitZoom() {
 }
 
 function makeLabel(x, y, text) {
+  const style = labelStyleFromControls();
   return {
     id: state.nextId++,
     text: text || els.labelText.value || "(가)",
     x,
     y,
-    fontSize: Number(els.fontSize.value),
-    padding: Number(els.labelPadding.value),
-    fontFamily: resolveFontFamily(),
-    color: els.textColor.value,
-    background: els.labelBackground.value,
-    bold: els.boldText.checked,
-    italic: els.italicText.checked,
-    underline: els.underlineText.checked,
-    outline: els.outlineText.checked,
+    ...style,
     leader: defaultLeader()
   };
 }
@@ -426,6 +417,7 @@ function updateInspector() {
   els.centerSelectedBtn.disabled = disabled;
   els.duplicateBtn.disabled = disabled;
   els.deleteBtn.disabled = disabled;
+  els.applyStyleAllBtn.disabled = state.labels.length === 0;
   els.leaderEnabled.disabled = disabled;
   els.leaderShape.disabled = disabled;
   els.leaderStyle.disabled = disabled;
@@ -639,9 +631,6 @@ els.saveProjectBtn.addEventListener("click", async () => {
 });
 
 els.exportPairBtn.addEventListener("click", exportPair);
-els.exportLabeledBtn.addEventListener("click", () => exportOne("labeled"));
-els.exportBlankBtn.addEventListener("click", () => exportOne("blank"));
-els.exportLabelsOnlyBtn.addEventListener("click", () => exportOne("labelsOnly"));
 
 els.addCenterBtn.addEventListener("click", () => {
   if (!state.image) return;
@@ -671,21 +660,56 @@ els.labelPadding.addEventListener("input", () => {
   }
 });
 
+function labelStyleFromControls() {
+  return {
+    fontSize: Number(els.fontSize.value),
+    padding: Number(els.labelPadding.value),
+    fontFamily: resolveFontFamily(),
+    customFont: els.customFont.value.trim(),
+    color: els.textColor.value,
+    background: els.labelBackground.value,
+    bold: els.boldText.checked,
+    italic: els.italicText.checked,
+    underline: els.underlineText.checked,
+    outline: els.outlineText.checked
+  };
+}
+
+function leaderStyleFromControls() {
+  return {
+    shape: els.leaderShape.value,
+    style: els.leaderStyle.value,
+    width: Number(els.leaderWidth.value),
+    gap: Number(els.leaderGap.value)
+  };
+}
+
 for (const control of [els.fontFamily, els.customFont, els.textColor, els.labelBackground, els.boldText, els.italicText, els.underlineText, els.outlineText]) {
   control.addEventListener("input", () => {
     const label = selectedLabel();
     if (!label) return;
-    label.fontFamily = resolveFontFamily();
-    label.customFont = els.customFont.value.trim();
-    label.color = els.textColor.value;
-    label.background = els.labelBackground.value;
-    label.bold = els.boldText.checked;
-    label.italic = els.italicText.checked;
-    label.underline = els.underlineText.checked;
-    label.outline = els.outlineText.checked;
+    Object.assign(label, labelStyleFromControls());
     render();
   });
 }
+
+els.applyStyleAllBtn.addEventListener("click", () => {
+  if (state.labels.length === 0) return;
+  const labelStyle = labelStyleFromControls();
+  const leaderStyle = leaderStyleFromControls();
+
+  for (const label of state.labels) {
+    Object.assign(label, labelStyle);
+    const leader = normalizedLeader(label);
+    label.leader = {
+      ...leader,
+      ...leaderStyle
+    };
+  }
+
+  render();
+  setStatus(`현재 서식을 라벨 ${state.labels.length}개에 적용했습니다`);
+});
 
 function updateLeaderFromControls() {
   const label = selectedLabel();

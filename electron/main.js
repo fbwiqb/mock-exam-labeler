@@ -1,15 +1,20 @@
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu } = require("electron");
 const fs = require("fs/promises");
 const path = require("path");
 
 let mainWindow;
 
 function createWindow() {
+  Menu.setApplicationMenu(null);
+
   mainWindow = new BrowserWindow({
     width: 1320,
     height: 860,
     minWidth: 1040,
     minHeight: 680,
+    title: "모의고사 라벨러",
+    icon: path.join(__dirname, "../assets/icon.png"),
+    autoHideMenuBar: true,
     backgroundColor: "#f5f5f2",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),

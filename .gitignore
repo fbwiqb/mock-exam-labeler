@@ -4,7 +4,7 @@ dist/
 out/
 *.log
 *.tmp
-ui_smoke*.png
+ui_*.png
 .env
 .env.*
 !.env.example

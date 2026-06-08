@@ -28,8 +28,8 @@ select {
 }
 
 button {
-  height: 34px;
-  padding: 0 12px;
+  height: 30px;
+  padding: 0 10px;
   border: 1px solid #b8b8b2;
   background: #fff;
   color: #111;
@@ -54,7 +54,7 @@ button.primary:hover {
 input,
 select {
   width: 100%;
-  height: 34px;
+  height: 30px;
   border: 1px solid #bdbdb7;
   border-radius: 6px;
   background: #fff;
@@ -62,7 +62,7 @@ select {
 }
 
 .app-header {
-  height: 58px;
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -79,11 +79,11 @@ select {
 }
 
 .brand strong {
-  font-size: 17px;
+  font-size: 18px;
 }
 
 .brand span {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
 }
 
@@ -97,13 +97,13 @@ select {
 }
 
 .app {
-  height: calc(100vh - 58px);
+  height: calc(100vh - 56px);
   display: grid;
-  grid-template-columns: 250px minmax(0, 1fr) 260px;
+  grid-template-columns: 330px minmax(0, 1fr) 340px;
 }
 
 .panel {
-  overflow: auto;
+  overflow: hidden;
   background: #fafafa;
   border-right: 1px solid var(--line);
 }
@@ -114,21 +114,21 @@ select {
 }
 
 .panel section {
-  padding: 16px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--line);
 }
 
 h2 {
-  margin: 0 0 12px;
-  font-size: 14px;
+  margin: 0 0 8px;
+  font-size: 13px;
   font-weight: 700;
 }
 
 label {
   display: grid;
-  gap: 6px;
-  margin: 12px 0;
-  font-size: 12px;
+  gap: 4px;
+  margin: 7px 0;
+  font-size: 11px;
   color: var(--muted);
 }
 
@@ -146,18 +146,42 @@ label.check input {
 
 .preset-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(8, 1fr);
   gap: 6px;
-  margin: 10px 0;
+  margin: 8px 0;
 }
 
 .preset-grid button {
   padding: 0;
 }
 
-.tools section > button {
-  width: 100%;
+.button-grid,
+.check-grid,
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.button-grid {
   margin-top: 8px;
+}
+
+.check-grid {
+  margin: 6px 0 8px;
+}
+
+.field-grid label {
+  min-width: 0;
+  margin: 0;
+}
+
+.span-2 {
+  grid-column: span 2;
+}
+
+button.wide {
+  width: 100%;
 }
 
 .hint {
@@ -170,7 +194,7 @@ label.check input {
 .workspace {
   min-width: 0;
   display: grid;
-  grid-template-rows: 48px minmax(0, 1fr);
+  grid-template-rows: 40px minmax(0, 1fr);
 }
 
 .stage-toolbar {
@@ -178,7 +202,7 @@ label.check input {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 0 14px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--line);
   background: #f8f8f6;
 }
@@ -191,7 +215,7 @@ label.check input {
 .canvas-shell {
   position: relative;
   overflow: auto;
-  padding: 28px;
+  padding: 22px;
   background: #e8e8e3;
 }
 
@@ -204,7 +228,7 @@ label.check input {
 
 .drop-empty {
   position: absolute;
-  inset: 28px;
+  inset: 22px;
   display: grid;
   place-content: center;
   gap: 8px;
@@ -226,7 +250,9 @@ label.check input {
 .label-list {
   display: grid;
   gap: 6px;
-  min-height: 120px;
+  min-height: 110px;
+  max-height: 150px;
+  overflow: auto;
 }
 
 .label-row {
@@ -235,7 +261,7 @@ label.check input {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 9px;
+  padding: 6px 8px;
   border: 1px solid #d1d1cc;
   background: #fff;
   border-radius: 6px;
@@ -259,7 +285,7 @@ label.check input {
 }
 
 .row-actions {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .row-actions button {
@@ -267,11 +293,17 @@ label.check input {
 }
 
 #fontSizeValue,
-#labelPaddingValue {
+#labelPaddingValue,
+#leaderWidthValue,
+#leaderGapValue {
   justify-self: end;
-  margin-top: -28px;
+  margin-top: -24px;
   margin-right: 4px;
   color: #111;
+}
+
+.leader-check {
+  margin: 0 0 8px;
 }
 
 .drag-over .drop-empty {

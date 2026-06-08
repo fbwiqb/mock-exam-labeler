@@ -12,6 +12,16 @@ Local Electron app for adding precise labels and leader lines to generated mock-
 - Export labeled PNG, blank PNG, and labels-only PNG.
 - Save and reopen project files as `.melp`.
 
+## Editable Workflow
+
+Use PNG exports for PowerPoint or exam insertion. Use `.melp` project files when you need to edit labels later.
+
+1. Open an image.
+2. Add labels and leader lines.
+3. Save the project as `.melp`.
+4. Export the labeled and blank PNG pair.
+5. Later, open the `.melp` file instead of the exported PNG to keep editing labels separately.
+
 ## Development
 
 ```bash
