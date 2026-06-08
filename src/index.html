@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>모의고사 라벨러</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <strong>모의고사 라벨러</strong>
+        <span id="fileName">이미지를 열어 시작하세요</span>
+      </div>
+      <div class="header-actions">
+        <button id="openImageBtn">이미지 열기</button>
+        <button id="openProjectBtn">프로젝트 열기</button>
+        <button id="saveProjectBtn">프로젝트 저장</button>
+        <button id="exportPairBtn" class="primary">라벨 포함/없음 저장</button>
+      </div>
+    </header>
+
+    <main class="app">
+      <aside class="panel tools">
+        <section>
+          <h2>라벨</h2>
+          <input id="labelText" type="text" value="(가)" autocomplete="off">
+          <div class="preset-grid" id="presetGrid"></div>
+          <button id="addCenterBtn">가운데 추가</button>
+          <button id="addModeBtn">클릭해서 추가</button>
+        </section>
+
+        <section>
+          <h2>모양</h2>
+          <label>
+            글꼴
+            <select id="fontFamily">
+              <option value="Batang, serif">바탕</option>
+              <option value="&quot;Malgun Gothic&quot;, &quot;Segoe UI&quot;, sans-serif">맑은 고딕</option>
+              <option value="Gulim, sans-serif">굴림</option>
+              <option value="Arial, sans-serif">Arial</option>
+              <option value="Times New Roman, serif">Times New Roman</option>
+              <option value="Cambria, serif">Cambria</option>
+            </select>
+          </label>
+          <label>
+            직접 글꼴
+            <input id="customFont" type="text" placeholder="예: KoPubWorld돋움체" autocomplete="off">
+          </label>
+          <label>
+            글자 크기
+            <input id="fontSize" type="range" min="12" max="72" value="28">
+            <span id="fontSizeValue">28</span>
+          </label>
+          <label>
+            주변 여백
+            <input id="labelPadding" type="range" min="0" max="24" value="8">
+            <span id="labelPaddingValue">8</span>
+          </label>
+          <label>
+            글자 색
+            <select id="textColor">
+              <option value="#111111">검정</option>
+              <option value="#ffffff">흰색</option>
+              <option value="#444444">진회색</option>
+            </select>
+          </label>
+          <label>
+            배경
+            <select id="labelBackground">
+              <option value="none">없음</option>
+              <option value="white">흰 상자</option>
+              <option value="gray">연회색 상자</option>
+            </select>
+          </label>
+          <label class="check">
+            <input id="boldText" type="checkbox">
+            굵게
+          </label>
+          <label class="check">
+            <input id="italicText" type="checkbox">
+            이탤릭
+          </label>
+          <label class="check">
+            <input id="underlineText" type="checkbox">
+            밑줄
+          </label>
+          <label class="check">
+            <input id="outlineText" type="checkbox" checked>
+            흰 외곽선
+          </label>
+        </section>
+
+        <section>
+          <h2>보기</h2>
+          <div class="segmented">
+            <button id="zoomOutBtn">-</button>
+            <button id="fitBtn">맞춤</button>
+            <button id="zoomInBtn">+</button>
+          </div>
+          <p class="hint">라벨을 드래그해 이동합니다. 더블클릭하면 문구를 바꿉니다. Delete로 삭제합니다.</p>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <div class="stage-toolbar">
+          <div id="status">대기 중</div>
+          <div class="export-actions">
+            <button id="exportLabeledBtn">라벨 포함 PNG</button>
+            <button id="exportBlankBtn">라벨 없음 PNG</button>
+            <button id="exportLabelsOnlyBtn">라벨만 PNG</button>
+          </div>
+        </div>
+        <div class="canvas-shell" id="canvasShell">
+          <canvas id="canvas"></canvas>
+          <div class="drop-empty" id="dropEmpty">
+            <strong>PNG/JPG를 여기에 놓으세요</strong>
+            <span>또는 상단의 이미지 열기를 누르세요</span>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel layers">
+        <section>
+          <h2>라벨 목록</h2>
+          <div id="labelList" class="label-list"></div>
+          <div class="row-actions">
+            <button id="duplicateBtn">복제</button>
+            <button id="deleteBtn">삭제</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>선택 항목</h2>
+          <label>
+            문구
+            <input id="selectedText" type="text" autocomplete="off">
+          </label>
+          <label>
+            X
+            <input id="selectedX" type="number" step="1">
+          </label>
+          <label>
+            Y
+            <input id="selectedY" type="number" step="1">
+          </label>
+          <button id="centerSelectedBtn">이미지 중앙으로</button>
+        </section>
+
+        <section>
+          <h2>지시선</h2>
+          <label class="check">
+            <input id="leaderEnabled" type="checkbox">
+            표시
+          </label>
+          <label>
+            형태
+            <select id="leaderShape">
+              <option value="straight">직선</option>
+              <option value="elbow">꺾은선</option>
+            </select>
+          </label>
+          <label>
+            선 종류
+            <select id="leaderStyle">
+              <option value="solid">실선</option>
+              <option value="dash">점선</option>
+              <option value="dot">짧은 점선</option>
+            </select>
+          </label>
+          <label>
+            굵기
+            <input id="leaderWidth" type="range" min="1" max="8" value="2">
+            <span id="leaderWidthValue">2</span>
+          </label>
+          <label>
+            라벨 간격
+            <input id="leaderGap" type="range" min="0" max="24" value="8">
+            <span id="leaderGapValue">8</span>
+          </label>
+          <label>
+            시작 X
+            <input id="leaderX" type="number" step="1">
+          </label>
+          <label>
+            시작 Y
+            <input id="leaderY" type="number" step="1">
+          </label>
+          <button id="leaderModeBtn">지시선 위치 드래그</button>
+          <button id="leaderClearBtn">지시선 제거</button>
+        </section>
+      </aside>
+    </main>
+
+    <input id="fileDropInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+    <div id="magnifier" class="magnifier" hidden>
+      <div id="magnifierSize" class="magnifier-size">0 × 0</div>
+      <canvas id="magnifierCanvas" width="240" height="150"></canvas>
+      <div id="magnifierMeta" class="magnifier-meta">0, 0</div>
+    </div>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

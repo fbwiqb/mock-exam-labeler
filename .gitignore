@@ -1,0 +1,10 @@
+node_modules/
+release/
+dist/
+out/
+*.log
+*.tmp
+ui_smoke*.png
+.env
+.env.*
+!.env.example

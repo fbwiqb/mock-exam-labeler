@@ -1,0 +1,928 @@
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const canvasShell = document.getElementById("canvasShell");
+const dropEmpty = document.getElementById("dropEmpty");
+
+const els = {
+  fileName: document.getElementById("fileName"),
+  status: document.getElementById("status"),
+  openImageBtn: document.getElementById("openImageBtn"),
+  openProjectBtn: document.getElementById("openProjectBtn"),
+  saveProjectBtn: document.getElementById("saveProjectBtn"),
+  exportPairBtn: document.getElementById("exportPairBtn"),
+  exportLabeledBtn: document.getElementById("exportLabeledBtn"),
+  exportBlankBtn: document.getElementById("exportBlankBtn"),
+  exportLabelsOnlyBtn: document.getElementById("exportLabelsOnlyBtn"),
+  labelText: document.getElementById("labelText"),
+  presetGrid: document.getElementById("presetGrid"),
+  addCenterBtn: document.getElementById("addCenterBtn"),
+  addModeBtn: document.getElementById("addModeBtn"),
+  fontFamily: document.getElementById("fontFamily"),
+  customFont: document.getElementById("customFont"),
+  fontSize: document.getElementById("fontSize"),
+  fontSizeValue: document.getElementById("fontSizeValue"),
+  labelPadding: document.getElementById("labelPadding"),
+  labelPaddingValue: document.getElementById("labelPaddingValue"),
+  textColor: document.getElementById("textColor"),
+  labelBackground: document.getElementById("labelBackground"),
+  boldText: document.getElementById("boldText"),
+  italicText: document.getElementById("italicText"),
+  underlineText: document.getElementById("underlineText"),
+  outlineText: document.getElementById("outlineText"),
+  zoomOutBtn: document.getElementById("zoomOutBtn"),
+  fitBtn: document.getElementById("fitBtn"),
+  zoomInBtn: document.getElementById("zoomInBtn"),
+  labelList: document.getElementById("labelList"),
+  duplicateBtn: document.getElementById("duplicateBtn"),
+  deleteBtn: document.getElementById("deleteBtn"),
+  selectedText: document.getElementById("selectedText"),
+  selectedX: document.getElementById("selectedX"),
+  selectedY: document.getElementById("selectedY"),
+  centerSelectedBtn: document.getElementById("centerSelectedBtn"),
+  leaderEnabled: document.getElementById("leaderEnabled"),
+  leaderShape: document.getElementById("leaderShape"),
+  leaderStyle: document.getElementById("leaderStyle"),
+  leaderWidth: document.getElementById("leaderWidth"),
+  leaderWidthValue: document.getElementById("leaderWidthValue"),
+  leaderGap: document.getElementById("leaderGap"),
+  leaderGapValue: document.getElementById("leaderGapValue"),
+  leaderX: document.getElementById("leaderX"),
+  leaderY: document.getElementById("leaderY"),
+  leaderModeBtn: document.getElementById("leaderModeBtn"),
+  leaderClearBtn: document.getElementById("leaderClearBtn"),
+  magnifier: document.getElementById("magnifier"),
+  magnifierCanvas: document.getElementById("magnifierCanvas"),
+  magnifierSize: document.getElementById("magnifierSize"),
+  magnifierMeta: document.getElementById("magnifierMeta"),
+  fileDropInput: document.getElementById("fileDropInput")
+};
+
+const presets = ["(가)", "(나)", "(다)", "(라)", "A", "B", "C", "D", "㉠", "㉡", "㉢", "㉣", "①", "②", "③", "④"];
+
+const state = {
+  image: null,
+  imageDataUrl: "",
+  imageName: "mock-exam-image",
+  imagePath: "",
+  labels: [],
+  selectedId: null,
+  nextId: 1,
+  zoom: 1,
+  mode: "select",
+  dragging: null
+};
+
+function setStatus(text) {
+  els.status.textContent = text;
+}
+
+function selectedLabel() {
+  return state.labels.find((label) => label.id === state.selectedId) || null;
+}
+
+function quoteFontFamily(font) {
+  const value = String(font || "").trim();
+  if (!value) return "Batang, serif";
+  if (value.includes(",") || value.includes("\"") || value.includes("'")) return value;
+  return `"${value}", Batang, serif`;
+}
+
+function resolveFontFamily() {
+  const custom = els.customFont.value.trim();
+  return custom ? quoteFontFamily(custom) : els.fontFamily.value;
+}
+
+function labelFont(label) {
+  const weight = label.bold ? "700" : "400";
+  const style = label.italic ? "italic" : "normal";
+  return `${style} ${weight} ${label.fontSize}px ${label.fontFamily || "Batang, serif"}`;
+}
+
+function labelBounds(label, context = ctx) {
+  context.save();
+  context.font = labelFont(label);
+  const metrics = context.measureText(label.text || " ");
+  context.restore();
+  const padding = Number.isFinite(label.padding) ? label.padding : 8;
+  const underlineExtra = label.underline ? Math.max(5, Math.round(label.fontSize * 0.18)) : 0;
+  const width = Math.ceil(metrics.width) + padding * 2;
+  const height = Math.ceil(label.fontSize * 1.25) + padding * 2 + underlineExtra;
+  return { x: label.x, y: label.y, width, height, padding, textWidth: metrics.width, underlineExtra };
+}
+
+function defaultLeader() {
+  return {
+    enabled: false,
+    x: 0,
+    y: 0,
+    shape: "straight",
+    style: "solid",
+    width: 2,
+    gap: 8
+  };
+}
+
+function normalizedLeader(label) {
+  return { ...defaultLeader(), ...(label.leader || {}) };
+}
+
+function labelAnchorPoint(label, leader, context = ctx) {
+  const bounds = labelBounds(label, context);
+  const cx = bounds.x + bounds.width / 2;
+  const cy = bounds.y + bounds.height / 2;
+  const dx = leader.x - cx;
+  const dy = leader.y - cy;
+  const halfW = bounds.width / 2 + leader.gap;
+  const halfH = bounds.height / 2 + leader.gap;
+
+  if (Math.abs(dx) * halfH > Math.abs(dy) * halfW) {
+    const side = dx > 0 ? 1 : -1;
+    return {
+      x: cx + side * halfW,
+      y: cy + (dy / Math.max(Math.abs(dx), 0.001)) * halfW
+    };
+  }
+
+  const side = dy > 0 ? 1 : -1;
+  return {
+    x: cx + (dx / Math.max(Math.abs(dy), 0.001)) * halfH,
+    y: cy + side * halfH
+  };
+}
+
+function applyLeaderDash(context, leader) {
+  if (leader.style === "dash") {
+    context.setLineDash([leader.width * 5, leader.width * 3]);
+    return;
+  }
+  if (leader.style === "dot") {
+    context.setLineDash([leader.width, leader.width * 3]);
+    return;
+  }
+  context.setLineDash([]);
+}
+
+function drawLeader(context, label, selected = false) {
+  const leader = normalizedLeader(label);
+  if (!leader.enabled) return;
+
+  const end = labelAnchorPoint(label, leader, context);
+  context.save();
+  context.strokeStyle = "#111";
+  context.lineWidth = leader.width;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  applyLeaderDash(context, leader);
+  context.beginPath();
+  context.moveTo(leader.x, leader.y);
+
+  if (leader.shape === "elbow") {
+    const midX = leader.x + (end.x - leader.x) * 0.58;
+    context.lineTo(midX, leader.y);
+    context.lineTo(midX, end.y);
+    context.lineTo(end.x, end.y);
+  } else {
+    context.lineTo(end.x, end.y);
+  }
+
+  context.stroke();
+  context.setLineDash([]);
+
+  if (selected) {
+    context.fillStyle = "#fff";
+    context.strokeStyle = "#1f4c8f";
+    context.lineWidth = 1.4;
+    context.beginPath();
+    context.arc(leader.x, leader.y, 5, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  }
+
+  context.restore();
+}
+
+function drawLabel(context, label, selected = false) {
+  const bounds = labelBounds(label, context);
+  context.save();
+  context.font = labelFont(label);
+  context.textBaseline = "top";
+  context.lineJoin = "round";
+
+  if (label.background !== "none") {
+    context.fillStyle = label.background === "gray" ? "rgba(238,238,238,0.96)" : "rgba(255,255,255,0.96)";
+    context.strokeStyle = "#111";
+    context.lineWidth = 1;
+    context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+    context.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+  }
+
+  const textX = bounds.x + bounds.padding;
+  const textY = bounds.y + bounds.padding;
+
+  if (label.outline) {
+    context.strokeStyle = label.color === "#ffffff" ? "#111111" : "#ffffff";
+    context.lineWidth = Math.max(3, Math.round(label.fontSize * 0.13));
+    context.strokeText(label.text, textX, textY);
+  }
+
+  context.fillStyle = label.color;
+  context.fillText(label.text, textX, textY);
+
+  if (label.underline) {
+    const gap = Math.max(3, Math.round(label.fontSize * 0.14));
+    const underlineY = textY + Math.round(label.fontSize * 1.02) + gap;
+    context.strokeStyle = label.color;
+    context.lineWidth = Math.max(1.2, Math.round(label.fontSize * 0.075));
+    context.beginPath();
+    context.moveTo(textX - 1, underlineY);
+    context.lineTo(textX + bounds.textWidth + 1, underlineY);
+    context.stroke();
+  }
+
+  if (selected) {
+    context.strokeStyle = "#1f4c8f";
+    context.lineWidth = 1;
+    context.setLineDash([4, 3]);
+    context.strokeRect(bounds.x - 4, bounds.y - 4, bounds.width + 8, bounds.height + 8);
+    context.setLineDash([]);
+  }
+
+  context.restore();
+}
+
+function drawTo(targetCanvas, options = {}) {
+  const includeImage = options.includeImage !== false;
+  const includeLabels = options.includeLabels !== false;
+  const includeSelection = options.includeSelection === true;
+  const targetCtx = targetCanvas.getContext("2d");
+  targetCtx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+
+  if (includeImage && state.image) {
+    targetCtx.drawImage(state.image, 0, 0);
+  }
+
+  if (includeLabels) {
+    for (const label of state.labels) {
+      drawLeader(targetCtx, label, includeSelection && label.id === state.selectedId);
+    }
+    for (const label of state.labels) {
+      drawLabel(targetCtx, label, includeSelection && label.id === state.selectedId);
+    }
+  }
+}
+
+function render() {
+  if (!state.image) {
+    canvas.style.display = "none";
+    dropEmpty.style.display = "grid";
+    updateLabelList();
+    updateInspector();
+    return;
+  }
+
+  canvas.width = state.image.naturalWidth;
+  canvas.height = state.image.naturalHeight;
+  canvas.style.width = `${Math.round(canvas.width * state.zoom)}px`;
+  canvas.style.height = `${Math.round(canvas.height * state.zoom)}px`;
+  canvas.style.display = "block";
+  dropEmpty.style.display = "none";
+  drawTo(canvas, { includeSelection: true });
+  updateLabelList();
+  updateInspector();
+  setStatus(`${canvas.width}×${canvas.height}px · ${Math.round(state.zoom * 100)}% · 라벨 ${state.labels.length}개`);
+}
+
+function fitZoom() {
+  if (!state.image) return;
+  const availableWidth = Math.max(240, canvasShell.clientWidth - 72);
+  const availableHeight = Math.max(180, canvasShell.clientHeight - 72);
+  state.zoom = Math.min(1, availableWidth / state.image.naturalWidth, availableHeight / state.image.naturalHeight);
+  state.zoom = Math.max(0.12, state.zoom);
+  render();
+}
+
+function makeLabel(x, y, text) {
+  return {
+    id: state.nextId++,
+    text: text || els.labelText.value || "(가)",
+    x,
+    y,
+    fontSize: Number(els.fontSize.value),
+    padding: Number(els.labelPadding.value),
+    fontFamily: resolveFontFamily(),
+    color: els.textColor.value,
+    background: els.labelBackground.value,
+    bold: els.boldText.checked,
+    italic: els.italicText.checked,
+    underline: els.underlineText.checked,
+    outline: els.outlineText.checked,
+    leader: defaultLeader()
+  };
+}
+
+function addLabelAt(x, y, text) {
+  if (!state.image) return;
+  const label = makeLabel(Math.round(x), Math.round(y), text);
+  state.labels.push(label);
+  state.selectedId = label.id;
+  state.mode = "select";
+  els.addModeBtn.textContent = "클릭해서 추가";
+  render();
+}
+
+function getCanvasPoint(event) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) / state.zoom,
+    y: (event.clientY - rect.top) / state.zoom
+  };
+}
+
+function hitLabel(point) {
+  for (let i = state.labels.length - 1; i >= 0; i -= 1) {
+    const label = state.labels[i];
+    const bounds = labelBounds(label);
+    if (point.x >= bounds.x && point.x <= bounds.x + bounds.width && point.y >= bounds.y && point.y <= bounds.y + bounds.height) {
+      return label;
+    }
+  }
+  return null;
+}
+
+function hitLeader(point) {
+  for (let i = state.labels.length - 1; i >= 0; i -= 1) {
+    const label = state.labels[i];
+    const leader = normalizedLeader(label);
+    if (!leader.enabled) continue;
+    const dx = point.x - leader.x;
+    const dy = point.y - leader.y;
+    if (Math.hypot(dx, dy) <= 12) return label;
+  }
+  return null;
+}
+
+function showMagnifier(event, point) {
+  if (!state.image) return;
+  const magnifierCtx = els.magnifierCanvas.getContext("2d", { willReadFrequently: true });
+  const sourceSize = 48;
+  const half = sourceSize / 2;
+  const sx = Math.max(0, Math.min(canvas.width - sourceSize, Math.round(point.x - half)));
+  const sy = Math.max(0, Math.min(canvas.height - sourceSize, Math.round(point.y - half)));
+
+  magnifierCtx.imageSmoothingEnabled = false;
+  magnifierCtx.clearRect(0, 0, els.magnifierCanvas.width, els.magnifierCanvas.height);
+  magnifierCtx.drawImage(canvas, sx, sy, sourceSize, Math.round(sourceSize * 0.625), 0, 0, els.magnifierCanvas.width, els.magnifierCanvas.height);
+
+  magnifierCtx.strokeStyle = "#2b8cff";
+  magnifierCtx.lineWidth = 2;
+  magnifierCtx.beginPath();
+  magnifierCtx.moveTo(els.magnifierCanvas.width / 2, 0);
+  magnifierCtx.lineTo(els.magnifierCanvas.width / 2, els.magnifierCanvas.height);
+  magnifierCtx.moveTo(0, els.magnifierCanvas.height / 2);
+  magnifierCtx.lineTo(els.magnifierCanvas.width, els.magnifierCanvas.height / 2);
+  magnifierCtx.stroke();
+
+  let colorText = "";
+  try {
+    const pixel = ctx.getImageData(Math.round(point.x), Math.round(point.y), 1, 1).data;
+    colorText = ` · RGB ${pixel[0]}, ${pixel[1]}, ${pixel[2]}`;
+  } catch (_error) {
+    colorText = "";
+  }
+
+  els.magnifierSize.textContent = `${Math.round(point.x)} × ${Math.round(point.y)}`;
+  els.magnifierMeta.textContent = `(${Math.round(point.x)}, ${Math.round(point.y)})${colorText}`;
+  const left = Math.min(window.innerWidth - 280, event.clientX + 18);
+  const top = Math.min(window.innerHeight - 220, event.clientY + 18);
+  els.magnifier.style.left = `${Math.max(8, left)}px`;
+  els.magnifier.style.top = `${Math.max(8, top)}px`;
+  els.magnifier.hidden = false;
+}
+
+function hideMagnifier() {
+  els.magnifier.hidden = true;
+}
+
+function updateLabelList() {
+  els.labelList.innerHTML = "";
+  for (const label of state.labels) {
+    const row = document.createElement("button");
+    row.className = `label-row${label.id === state.selectedId ? " selected" : ""}`;
+    row.innerHTML = `<span>${escapeHtml(label.text)}</span><span>${Math.round(label.x)}, ${Math.round(label.y)}</span>`;
+    row.addEventListener("click", () => {
+      state.selectedId = label.id;
+      render();
+    });
+    els.labelList.appendChild(row);
+  }
+}
+
+function updateInspector() {
+  const label = selectedLabel();
+  const disabled = !label;
+  els.selectedText.disabled = disabled;
+  els.selectedX.disabled = disabled;
+  els.selectedY.disabled = disabled;
+  els.centerSelectedBtn.disabled = disabled;
+  els.duplicateBtn.disabled = disabled;
+  els.deleteBtn.disabled = disabled;
+  els.leaderEnabled.disabled = disabled;
+  els.leaderShape.disabled = disabled;
+  els.leaderStyle.disabled = disabled;
+  els.leaderWidth.disabled = disabled;
+  els.leaderGap.disabled = disabled;
+  els.leaderX.disabled = disabled;
+  els.leaderY.disabled = disabled;
+  els.leaderModeBtn.disabled = disabled;
+  els.leaderClearBtn.disabled = disabled;
+
+  if (!label) {
+    els.selectedText.value = "";
+    els.selectedX.value = "";
+    els.selectedY.value = "";
+    els.leaderEnabled.checked = false;
+    els.leaderWidthValue.textContent = els.leaderWidth.value;
+    els.leaderGapValue.textContent = els.leaderGap.value;
+    els.leaderX.value = "";
+    els.leaderY.value = "";
+    return;
+  }
+
+  const leader = normalizedLeader(label);
+  els.selectedText.value = label.text;
+  els.selectedX.value = Math.round(label.x);
+  els.selectedY.value = Math.round(label.y);
+  els.fontSize.value = label.fontSize;
+  els.fontSizeValue.textContent = String(label.fontSize);
+  els.labelPadding.value = Number.isFinite(label.padding) ? label.padding : 8;
+  els.labelPaddingValue.textContent = String(Number.isFinite(label.padding) ? label.padding : 8);
+  els.textColor.value = label.color || "#111111";
+  els.labelBackground.value = label.background || "none";
+  els.boldText.checked = Boolean(label.bold);
+  els.italicText.checked = Boolean(label.italic);
+  els.underlineText.checked = Boolean(label.underline);
+  els.outlineText.checked = label.outline !== false;
+  els.leaderEnabled.checked = leader.enabled;
+  els.leaderShape.value = leader.shape;
+  els.leaderStyle.value = leader.style;
+  els.leaderWidth.value = leader.width;
+  els.leaderWidthValue.textContent = String(leader.width);
+  els.leaderGap.value = leader.gap;
+  els.leaderGapValue.textContent = String(leader.gap);
+  els.leaderX.value = leader.enabled ? Math.round(leader.x) : "";
+  els.leaderY.value = leader.enabled ? Math.round(leader.y) : "";
+  els.customFont.value = label.customFont || "";
+  if (!label.customFont && label.fontFamily) {
+    const option = Array.from(els.fontFamily.options).find((item) => item.value === label.fontFamily);
+    if (option) els.fontFamily.value = label.fontFamily;
+  }
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+async function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "") {
+  const image = new Image();
+  image.onload = () => {
+    state.image = image;
+    state.imageDataUrl = dataUrl;
+    state.imageName = fileName || "mock-exam-image";
+    state.imagePath = filePath;
+    state.labels = [];
+    state.selectedId = null;
+    state.nextId = 1;
+    els.fileName.textContent = `${state.imageName} · ${image.naturalWidth}×${image.naturalHeight}px`;
+    fitZoom();
+  };
+  image.src = dataUrl;
+}
+
+async function loadProject(project) {
+  if (!project || !project.imageDataUrl) return;
+  const image = new Image();
+  image.onload = () => {
+    state.image = image;
+    state.imageDataUrl = project.imageDataUrl;
+    state.imageName = project.imageName || "mock-exam-image";
+    state.imagePath = project.imagePath || "";
+    state.labels = Array.isArray(project.labels) ? project.labels : [];
+    state.selectedId = null;
+    state.nextId = Math.max(1, ...state.labels.map((label) => Number(label.id) || 0)) + 1;
+    els.fileName.textContent = `${state.imageName} · ${image.naturalWidth}×${image.naturalHeight}px`;
+    fitZoom();
+  };
+  image.src = project.imageDataUrl;
+}
+
+function projectPayload() {
+  return {
+    version: 1,
+    imageName: state.imageName,
+    imagePath: state.imagePath,
+    imageDataUrl: state.imageDataUrl,
+    labels: state.labels
+  };
+}
+
+function exportCanvas(includeImage, includeLabels) {
+  const exportCanvasEl = document.createElement("canvas");
+  exportCanvasEl.width = state.image.naturalWidth;
+  exportCanvasEl.height = state.image.naturalHeight;
+  drawTo(exportCanvasEl, { includeImage, includeLabels, includeSelection: false });
+  return exportCanvasEl.toDataURL("image/png");
+}
+
+function safeBaseName() {
+  return (state.imageName || "mock-exam-image").replace(/[\\/:*?"<>|]+/g, "_");
+}
+
+async function exportOne(kind) {
+  if (!state.image) return;
+  const base = safeBaseName();
+  const map = {
+    labeled: {
+      dataUrl: exportCanvas(true, true),
+      defaultName: `${base}_labeled.png`,
+      title: "라벨 포함 PNG 저장"
+    },
+    blank: {
+      dataUrl: exportCanvas(true, false),
+      defaultName: `${base}_blank.png`,
+      title: "라벨 없음 PNG 저장"
+    },
+    labelsOnly: {
+      dataUrl: exportCanvas(false, true),
+      defaultName: `${base}_labels_only.png`,
+      title: "라벨만 PNG 저장"
+    }
+  };
+  const saved = await window.labeler.saveDataUrl(map[kind]);
+  if (saved) setStatus(`저장 완료: ${saved}`);
+}
+
+async function exportPair() {
+  if (!state.image) return;
+  const base = safeBaseName();
+  const saved = await window.labeler.saveExportSet({
+    files: [
+      { name: `${base}_labeled.png`, dataUrl: exportCanvas(true, true) },
+      { name: `${base}_blank.png`, dataUrl: exportCanvas(true, false) }
+    ]
+  });
+  if (saved) setStatus(`2개 저장 완료: ${saved.length}개 파일`);
+}
+
+function readDroppedFile(file) {
+  if (!file || !file.type.startsWith("image/")) return;
+  const reader = new FileReader();
+  reader.onload = () => loadImageData(reader.result, file.name.replace(/\.[^.]+$/, ""), "");
+  reader.readAsDataURL(file);
+}
+
+function deleteSelected() {
+  if (!state.selectedId) return;
+  state.labels = state.labels.filter((label) => label.id !== state.selectedId);
+  state.selectedId = null;
+  render();
+}
+
+function duplicateSelected() {
+  const label = selectedLabel();
+  if (!label) return;
+  const copy = { ...label, id: state.nextId++, x: label.x + 16, y: label.y + 16 };
+  state.labels.push(copy);
+  state.selectedId = copy.id;
+  render();
+}
+
+function moveSelected(dx, dy) {
+  const label = selectedLabel();
+  if (!label) return;
+  label.x = Math.round(label.x + dx);
+  label.y = Math.round(label.y + dy);
+  render();
+}
+
+for (const preset of presets) {
+  const button = document.createElement("button");
+  button.textContent = preset;
+  button.addEventListener("click", () => {
+    els.labelText.value = preset;
+  });
+  els.presetGrid.appendChild(button);
+}
+
+els.openImageBtn.addEventListener("click", async () => {
+  const result = await window.labeler.openImage();
+  if (result) loadImageData(result.dataUrl, result.fileName, result.filePath);
+});
+
+els.openProjectBtn.addEventListener("click", async () => {
+  const result = await window.labeler.openProject();
+  if (result) loadProject(result.project);
+});
+
+els.saveProjectBtn.addEventListener("click", async () => {
+  if (!state.image) return;
+  const saved = await window.labeler.saveProject({
+    fileName: safeBaseName(),
+    project: projectPayload()
+  });
+  if (saved) setStatus(`프로젝트 저장 완료: ${saved}`);
+});
+
+els.exportPairBtn.addEventListener("click", exportPair);
+els.exportLabeledBtn.addEventListener("click", () => exportOne("labeled"));
+els.exportBlankBtn.addEventListener("click", () => exportOne("blank"));
+els.exportLabelsOnlyBtn.addEventListener("click", () => exportOne("labelsOnly"));
+
+els.addCenterBtn.addEventListener("click", () => {
+  if (!state.image) return;
+  addLabelAt(state.image.naturalWidth / 2 - 22, state.image.naturalHeight / 2 - 18);
+});
+
+els.addModeBtn.addEventListener("click", () => {
+  state.mode = state.mode === "add" ? "select" : "add";
+  els.addModeBtn.textContent = state.mode === "add" ? "추가 모드 중" : "클릭해서 추가";
+});
+
+els.fontSize.addEventListener("input", () => {
+  els.fontSizeValue.textContent = els.fontSize.value;
+  const label = selectedLabel();
+  if (label) {
+    label.fontSize = Number(els.fontSize.value);
+    render();
+  }
+});
+
+els.labelPadding.addEventListener("input", () => {
+  els.labelPaddingValue.textContent = els.labelPadding.value;
+  const label = selectedLabel();
+  if (label) {
+    label.padding = Number(els.labelPadding.value);
+    render();
+  }
+});
+
+for (const control of [els.fontFamily, els.customFont, els.textColor, els.labelBackground, els.boldText, els.italicText, els.underlineText, els.outlineText]) {
+  control.addEventListener("input", () => {
+    const label = selectedLabel();
+    if (!label) return;
+    label.fontFamily = resolveFontFamily();
+    label.customFont = els.customFont.value.trim();
+    label.color = els.textColor.value;
+    label.background = els.labelBackground.value;
+    label.bold = els.boldText.checked;
+    label.italic = els.italicText.checked;
+    label.underline = els.underlineText.checked;
+    label.outline = els.outlineText.checked;
+    render();
+  });
+}
+
+function updateLeaderFromControls() {
+  const label = selectedLabel();
+  if (!label) return;
+  const existing = normalizedLeader(label);
+  const bounds = labelBounds(label);
+  label.leader = {
+    ...existing,
+    enabled: els.leaderEnabled.checked,
+    shape: els.leaderShape.value,
+    style: els.leaderStyle.value,
+    width: Number(els.leaderWidth.value),
+    gap: Number(els.leaderGap.value),
+    x: Number.isFinite(Number(els.leaderX.value)) && els.leaderX.value !== "" ? Number(els.leaderX.value) : existing.x,
+    y: Number.isFinite(Number(els.leaderY.value)) && els.leaderY.value !== "" ? Number(els.leaderY.value) : existing.y
+  };
+  if (!Number.isFinite(label.leader.x) || label.leader.x === 0 && label.leader.y === 0) {
+    label.leader.x = Math.round(bounds.x - 42);
+    label.leader.y = Math.round(bounds.y + bounds.height / 2);
+  }
+  els.leaderWidthValue.textContent = String(label.leader.width);
+  els.leaderGapValue.textContent = String(label.leader.gap);
+  els.leaderX.value = Math.round(label.leader.x);
+  els.leaderY.value = Math.round(label.leader.y);
+  render();
+}
+
+for (const control of [els.leaderEnabled, els.leaderShape, els.leaderStyle, els.leaderWidth, els.leaderGap, els.leaderX, els.leaderY]) {
+  control.addEventListener("input", updateLeaderFromControls);
+}
+
+els.leaderModeBtn.addEventListener("click", () => {
+  const label = selectedLabel();
+  if (!label) return;
+  const leader = normalizedLeader(label);
+  label.leader = { ...leader, enabled: true };
+  els.leaderEnabled.checked = true;
+  state.mode = state.mode === "leader" ? "select" : "leader";
+  els.leaderModeBtn.textContent = state.mode === "leader" ? "지시선 드래그 중" : "지시선 위치 드래그";
+  render();
+});
+
+els.leaderClearBtn.addEventListener("click", () => {
+  const label = selectedLabel();
+  if (!label) return;
+  label.leader = { ...normalizedLeader(label), enabled: false };
+  state.mode = "select";
+  els.leaderModeBtn.textContent = "지시선 위치 드래그";
+  render();
+});
+
+els.zoomOutBtn.addEventListener("click", () => {
+  state.zoom = Math.max(0.12, state.zoom / 1.2);
+  render();
+});
+
+els.zoomInBtn.addEventListener("click", () => {
+  state.zoom = Math.min(4, state.zoom * 1.2);
+  render();
+});
+
+els.fitBtn.addEventListener("click", fitZoom);
+
+els.selectedText.addEventListener("input", () => {
+  const label = selectedLabel();
+  if (!label) return;
+  label.text = els.selectedText.value;
+  render();
+});
+
+els.selectedX.addEventListener("input", () => {
+  const label = selectedLabel();
+  if (!label) return;
+  label.x = Number(els.selectedX.value);
+  render();
+});
+
+els.selectedY.addEventListener("input", () => {
+  const label = selectedLabel();
+  if (!label) return;
+  label.y = Number(els.selectedY.value);
+  render();
+});
+
+els.centerSelectedBtn.addEventListener("click", () => {
+  const label = selectedLabel();
+  if (!label || !state.image) return;
+  const bounds = labelBounds(label);
+  label.x = Math.round((state.image.naturalWidth - bounds.width) / 2);
+  label.y = Math.round((state.image.naturalHeight - bounds.height) / 2);
+  render();
+});
+
+els.duplicateBtn.addEventListener("click", duplicateSelected);
+els.deleteBtn.addEventListener("click", deleteSelected);
+
+canvas.addEventListener("pointerdown", (event) => {
+  if (!state.image) return;
+  const point = getCanvasPoint(event);
+
+  if (state.mode === "add") {
+    addLabelAt(point.x, point.y);
+    return;
+  }
+
+  if (state.mode === "leader") {
+    const label = selectedLabel();
+    if (label) {
+      label.leader = {
+        ...normalizedLeader(label),
+        enabled: true,
+        x: Math.round(point.x),
+        y: Math.round(point.y)
+      };
+      state.dragging = { type: "leader", id: label.id };
+      canvas.setPointerCapture(event.pointerId);
+      render();
+      showMagnifier(event, point);
+      return;
+    }
+  }
+
+  const leaderHit = hitLeader(point);
+  if (leaderHit) {
+    state.selectedId = leaderHit.id;
+    state.dragging = { type: "leader", id: leaderHit.id };
+    canvas.setPointerCapture(event.pointerId);
+    render();
+    showMagnifier(event, point);
+    return;
+  }
+
+  const hit = hitLabel(point);
+  if (hit) {
+    const bounds = labelBounds(hit);
+    state.selectedId = hit.id;
+    state.dragging = { type: "label", id: hit.id, offsetX: point.x - bounds.x, offsetY: point.y - bounds.y };
+    canvas.setPointerCapture(event.pointerId);
+  } else {
+    state.selectedId = null;
+  }
+  render();
+});
+
+canvas.addEventListener("pointermove", (event) => {
+  if (!state.dragging) return;
+  const label = state.labels.find((item) => item.id === state.dragging.id);
+  if (!label) return;
+  const point = getCanvasPoint(event);
+
+  if (state.dragging.type === "leader") {
+    label.leader = {
+      ...normalizedLeader(label),
+      enabled: true,
+      x: Math.round(point.x),
+      y: Math.round(point.y)
+    };
+    showMagnifier(event, point);
+  } else {
+    label.x = Math.round(point.x - state.dragging.offsetX);
+    label.y = Math.round(point.y - state.dragging.offsetY);
+  }
+
+  render();
+});
+
+canvas.addEventListener("pointerup", (event) => {
+  if (state.dragging?.type === "leader" && state.mode === "leader") {
+    state.mode = "select";
+    els.leaderModeBtn.textContent = "지시선 위치 드래그";
+  }
+  state.dragging = null;
+  hideMagnifier();
+  try {
+    canvas.releasePointerCapture(event.pointerId);
+  } catch (_error) {
+  }
+});
+
+canvas.addEventListener("pointercancel", () => {
+  state.dragging = null;
+  hideMagnifier();
+});
+
+canvas.addEventListener("pointerleave", () => {
+  if (!state.dragging) hideMagnifier();
+});
+
+canvas.addEventListener("dblclick", () => {
+  const label = selectedLabel();
+  if (!label) return;
+  const next = window.prompt("라벨 문구", label.text);
+  if (next !== null) {
+    label.text = next;
+    render();
+  }
+});
+
+canvasShell.addEventListener("dragover", (event) => {
+  event.preventDefault();
+  canvasShell.classList.add("drag-over");
+});
+
+canvasShell.addEventListener("dragleave", () => {
+  canvasShell.classList.remove("drag-over");
+});
+
+canvasShell.addEventListener("drop", (event) => {
+  event.preventDefault();
+  canvasShell.classList.remove("drag-over");
+  readDroppedFile(event.dataTransfer.files[0]);
+});
+
+document.addEventListener("keydown", (event) => {
+  const tag = document.activeElement?.tagName;
+  const typing = tag === "INPUT" || tag === "TEXTAREA";
+
+  if (event.key === "Delete" && !typing) {
+    deleteSelected();
+  }
+
+  if (!typing && event.key.startsWith("Arrow")) {
+    const step = event.shiftKey ? 10 : 1;
+    if (event.key === "ArrowLeft") moveSelected(-step, 0);
+    if (event.key === "ArrowRight") moveSelected(step, 0);
+    if (event.key === "ArrowUp") moveSelected(0, -step);
+    if (event.key === "ArrowDown") moveSelected(0, step);
+  }
+
+  if (event.ctrlKey && event.key.toLowerCase() === "d") {
+    event.preventDefault();
+    duplicateSelected();
+  }
+});
+
+window.addEventListener("resize", () => {
+  if (state.image) render();
+});
+
+render();

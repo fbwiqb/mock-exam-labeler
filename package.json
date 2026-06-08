@@ -1,0 +1,47 @@
+{
+  "name": "mock-exam-labeler",
+  "version": "0.1.1",
+  "description": "Local label editor for Korean mock exam illustrations",
+  "main": "electron/main.js",
+  "author": {
+    "name": "CNSA",
+    "email": "drmin01@naver.com"
+  },
+  "scripts": {
+    "dev": "electron .",
+    "dist": "electron-builder --win nsis portable",
+    "pack": "electron-builder --dir",
+    "check": "node --check electron/main.js && node --check electron/preload.js && node --check src/renderer.js"
+  },
+  "build": {
+    "appId": "kr.cnsa.mockExamLabeler",
+    "productName": "모의고사 라벨러",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "모의고사 라벨러"
+    }
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  }
+}
