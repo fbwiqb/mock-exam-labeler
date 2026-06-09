@@ -9,16 +9,20 @@
   </head>
   <body>
     <header class="app-header">
-      <div class="brand">
-        <strong>모의고사 라벨러</strong>
-        <span id="fileName">이미지를 열어 시작하세요</span>
+      <div class="header-left">
+        <div class="brand">
+          <strong>모의고사 라벨러</strong>
+          <span id="fileName">이미지를 열어 시작하세요</span>
+        </div>
+        <div class="header-actions">
+          <button id="openImageBtn">이미지 열기</button>
+          <button id="openProjectBtn">프로젝트 열기</button>
+        </div>
       </div>
       <div class="header-actions">
         <button id="helpBtn">사용법</button>
-        <button id="openImageBtn">이미지 열기</button>
-        <button id="openProjectBtn">프로젝트 열기</button>
         <button id="saveProjectBtn">프로젝트 저장(.melp)</button>
-        <button id="exportPairBtn" class="primary">라벨 포함/없음 저장</button>
+        <button id="saveImageBtn" class="primary">이미지 저장</button>
       </div>
     </header>
 
@@ -28,10 +32,6 @@
           <h2>라벨</h2>
           <input id="labelText" type="text" value="(가)" autocomplete="off">
           <div class="preset-grid" id="presetGrid"></div>
-          <div class="button-grid">
-            <button id="addCenterBtn">가운데</button>
-            <button id="addModeBtn">지시선 추가</button>
-          </div>
         </section>
 
         <section>
@@ -48,15 +48,15 @@
                 <option value="Cambria, serif">Cambria</option>
               </select>
             </label>
-            <label>
+            <label class="range-label">
               글자 크기
-              <input id="fontSize" type="range" min="12" max="72" value="28">
               <span id="fontSizeValue">28</span>
+              <input id="fontSize" type="range" min="12" max="72" value="28">
             </label>
-            <label>
+            <label class="range-label">
               주변 여백
-              <input id="labelPadding" type="range" min="0" max="24" value="8">
               <span id="labelPaddingValue">8</span>
+              <input id="labelPadding" type="range" min="0" max="24" value="8">
             </label>
             <label>
               글자 색
@@ -75,23 +75,11 @@
               </select>
             </label>
           </div>
-          <div class="check-grid">
-            <label class="check">
-              <input id="boldText" type="checkbox">
-              굵게
-            </label>
-            <label class="check">
-              <input id="italicText" type="checkbox">
-              이탤릭
-            </label>
-            <label class="check">
-              <input id="underlineText" type="checkbox">
-              밑줄
-            </label>
-            <label class="check">
-              <input id="outlineText" type="checkbox" checked>
-              흰 외곽선
-            </label>
+          <div class="toggle-grid">
+            <button id="boldText" class="toggle-button" aria-pressed="false">굵게</button>
+            <button id="italicText" class="toggle-button" aria-pressed="false">이탤릭</button>
+            <button id="underlineText" class="toggle-button" aria-pressed="false">밑줄</button>
+            <button id="outlineText" class="toggle-button active" aria-pressed="true">흰 외곽선</button>
           </div>
           <button id="applyStyleAllBtn" class="wide">현재 서식 전체 적용</button>
         </section>
@@ -141,15 +129,11 @@
               <input id="selectedY" type="number" step="1">
             </label>
           </div>
-          <button id="centerSelectedBtn" class="wide">이미지 중앙으로</button>
         </section>
 
         <section>
           <h2>지시선</h2>
-          <label class="check leader-check">
-            <input id="leaderEnabled" type="checkbox">
-            표시
-          </label>
+          <button id="leaderEnabled" class="toggle-button leader-toggle" aria-pressed="false">표시</button>
           <div class="field-grid">
             <label>
               형태
@@ -166,15 +150,15 @@
                 <option value="dot">짧은 점선</option>
               </select>
             </label>
-            <label>
+            <label class="range-label">
               굵기
-              <input id="leaderWidth" type="range" min="1" max="8" value="2">
               <span id="leaderWidthValue">2</span>
+              <input id="leaderWidth" type="range" min="1" max="8" value="2">
             </label>
-            <label>
+            <label class="range-label">
               라벨 간격
-              <input id="leaderGap" type="range" min="0" max="24" value="8">
               <span id="leaderGapValue">8</span>
+              <input id="leaderGap" type="range" min="0" max="24" value="8">
             </label>
             <label>
               시작 X
@@ -196,6 +180,7 @@
       <canvas id="magnifierCanvas" width="240" height="150"></canvas>
       <div id="magnifierMeta" class="magnifier-meta">0, 0</div>
     </div>
+    <div id="toast" class="toast" hidden></div>
     <dialog id="helpDialog">
       <div class="help">
         <header>
@@ -204,14 +189,20 @@
         </header>
         <ol>
           <li><strong>이미지 열기</strong>로 PNG/JPG를 불러옵니다.</li>
-          <li><strong>지시선 추가</strong>를 켜고, 그림에서 가리킬 지점을 누른 채 라벨을 둘 곳까지 드래그합니다.</li>
+          <li>왼쪽의 라벨 버튼을 누르거나 문구를 입력하면 라벨 추가가 켜집니다.</li>
+          <li>그림에서 가리킬 지점을 누른 채 라벨을 둘 곳까지 드래그합니다.</li>
           <li>라벨은 드래그해 옮기고, 지시선 끝점은 작은 핸들을 잡아 미세 조정합니다.</li>
           <li>드래그 중 루페가 나타나 픽셀 위치를 확대해서 보여줍니다.</li>
-          <li>나중에 다시 수정하려면 <strong>프로젝트 저장(.melp)</strong>을 저장하고, 다음에는 PNG가 아니라 `.melp`를 엽니다.</li>
-          <li>시험지나 PPT에는 <strong>라벨 포함/없음 저장</strong>으로 만든 PNG 두 장을 사용합니다.</li>
+          <li><strong>프로젝트 저장(.melp)</strong>은 다시 편집할 수 있는 원본이고, <strong>이미지 저장</strong>은 라벨이 합쳐진 PNG입니다.</li>
+          <li>Ctrl+Z/Ctrl+Y 또는 아래쪽 아이콘으로 실행 취소와 다시 실행을 할 수 있습니다.</li>
         </ol>
       </div>
     </dialog>
+    <footer class="app-footer">
+      <button id="undoBtn" class="icon-button" aria-label="실행 취소" title="실행 취소 (Ctrl+Z)">↶</button>
+      <button id="redoBtn" class="icon-button" aria-label="다시 실행" title="다시 실행 (Ctrl+Y)">↷</button>
+      <span>Ctrl+Z / Ctrl+Y</span>
+    </footer>
     <script src="./renderer.js"></script>
   </body>
 </html>

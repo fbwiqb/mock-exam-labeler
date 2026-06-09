@@ -4,6 +4,26 @@ const fs = require("fs/promises");
 const path = require("path");
 
 let mainWindow;
+let pendingProjectPath = null;
+let allowClose = false;
+let hasUnsavedChanges = false;
+
+function projectPathFromArgv(argv) {
+  return argv.find((item) => String(item || "").toLowerCase().endsWith(".melp")) || null;
+}
+
+async function sendProjectToWindow(filePath) {
+  if (!filePath || !mainWindow) return;
+  try {
+    const text = await fs.readFile(filePath, "utf8");
+    mainWindow.webContents.send("open-project-data", {
+      filePath,
+      project: JSON.parse(text)
+    });
+  } catch (_error) {
+    dialog.showErrorBox("프로젝트 열기 실패", "프로젝트 파일을 열 수 없습니다.");
+  }
+}
 
 function createWindow() {
   Menu.setApplicationMenu(null);
@@ -25,6 +45,30 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, "../src/index.html"));
+  mainWindow.webContents.once("did-finish-load", () => {
+    if (pendingProjectPath) {
+      sendProjectToWindow(pendingProjectPath);
+      pendingProjectPath = null;
+    }
+  });
+  mainWindow.on("close", async (event) => {
+    if (allowClose || !hasUnsavedChanges) return;
+    event.preventDefault();
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: "warning",
+      title: "저장하지 않은 변경사항",
+      message: "프로젝트를 저장하지 않고 닫을까요?",
+      detail: "저장하지 않으면 라벨 위치와 지시선 편집 내용이 사라질 수 있습니다.",
+      buttons: ["닫기", "취소"],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true
+    });
+    if (result.response === 0) {
+      allowClose = true;
+      mainWindow.close();
+    }
+  });
 }
 
 function extensionToMime(filePath) {
@@ -51,7 +95,21 @@ function runPowerShell(command) {
   });
 }
 
-app.whenReady().then(createWindow);
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, argv) => {
+    const projectPath = projectPathFromArgv(argv);
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+      if (projectPath) sendProjectToWindow(projectPath);
+    }
+  });
+
+  pendingProjectPath = projectPathFromArgv(process.argv);
+  app.whenReady().then(createWindow);
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
@@ -127,17 +185,41 @@ ipcMain.handle("open-project", async () => {
 });
 
 ipcMain.handle("save-project", async (_event, payload) => {
-  const result = await dialog.showSaveDialog(mainWindow, {
+  const buttons = payload.imagePath ? ["그림과 같은 폴더", "위치 지정", "취소"] : ["위치 지정", "취소"];
+  const choice = await dialog.showMessageBox(mainWindow, {
+    type: "question",
     title: "프로젝트 저장",
-    defaultPath: `${payload.fileName || "mock-exam-labels"}.melp`,
-    filters: [
-      { name: "Mock Exam Labeler Project", extensions: ["melp"] }
-    ]
+    message: "프로젝트를 어디에 저장할까요?",
+    buttons,
+    defaultId: 0,
+    cancelId: buttons.length - 1,
+    noLink: true
   });
 
-  if (result.canceled || !result.filePath) return null;
-  await fs.writeFile(result.filePath, JSON.stringify(payload.project, null, 2), "utf8");
-  return result.filePath;
+  if (choice.response === buttons.length - 1) return null;
+  let filePath = "";
+
+  if (payload.imagePath && choice.response === 0) {
+    filePath = path.join(path.dirname(payload.imagePath), `${payload.fileName || "mock-exam-labels"}.melp`);
+  } else {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: "프로젝트 저장",
+      defaultPath: `${payload.fileName || "mock-exam-labels"}.melp`,
+      filters: [
+        { name: "Mock Exam Labeler Project", extensions: ["melp"] }
+      ]
+    });
+    if (result.canceled || !result.filePath) return null;
+    filePath = result.filePath;
+  }
+
+  await fs.writeFile(filePath, JSON.stringify(payload.project, null, 2), "utf8");
+  return filePath;
+});
+
+ipcMain.on("set-dirty-state", (_event, dirty) => {
+  hasUnsavedChanges = Boolean(dirty);
+  if (mainWindow) mainWindow.setDocumentEdited(hasUnsavedChanges);
 });
 
 ipcMain.handle("save-data-url", async (_event, payload) => {
@@ -152,23 +234,4 @@ ipcMain.handle("save-data-url", async (_event, payload) => {
   if (result.canceled || !result.filePath) return null;
   await fs.writeFile(result.filePath, dataUrlToBuffer(payload.dataUrl));
   return result.filePath;
-});
-
-ipcMain.handle("save-export-set", async (_event, payload) => {
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: "내보낼 폴더 선택",
-    properties: ["openDirectory", "createDirectory"]
-  });
-
-  if (result.canceled || result.filePaths.length === 0) return null;
-  const directory = result.filePaths[0];
-  const saved = [];
-
-  for (const file of payload.files) {
-    const filePath = path.join(directory, file.name);
-    await fs.writeFile(filePath, dataUrlToBuffer(file.dataUrl));
-    saved.push(filePath);
-  }
-
-  return saved;
 });

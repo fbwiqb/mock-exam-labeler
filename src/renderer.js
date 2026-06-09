@@ -9,11 +9,9 @@ const els = {
   openImageBtn: document.getElementById("openImageBtn"),
   openProjectBtn: document.getElementById("openProjectBtn"),
   saveProjectBtn: document.getElementById("saveProjectBtn"),
-  exportPairBtn: document.getElementById("exportPairBtn"),
+  saveImageBtn: document.getElementById("saveImageBtn"),
   labelText: document.getElementById("labelText"),
   presetGrid: document.getElementById("presetGrid"),
-  addCenterBtn: document.getElementById("addCenterBtn"),
-  addModeBtn: document.getElementById("addModeBtn"),
   applyStyleAllBtn: document.getElementById("applyStyleAllBtn"),
   fontFamily: document.getElementById("fontFamily"),
   fontSize: document.getElementById("fontSize"),
@@ -35,7 +33,6 @@ const els = {
   selectedText: document.getElementById("selectedText"),
   selectedX: document.getElementById("selectedX"),
   selectedY: document.getElementById("selectedY"),
-  centerSelectedBtn: document.getElementById("centerSelectedBtn"),
   leaderEnabled: document.getElementById("leaderEnabled"),
   leaderShape: document.getElementById("leaderShape"),
   leaderStyle: document.getElementById("leaderStyle"),
@@ -53,26 +50,139 @@ const els = {
   fileDropInput: document.getElementById("fileDropInput"),
   helpBtn: document.getElementById("helpBtn"),
   helpDialog: document.getElementById("helpDialog"),
-  helpCloseBtn: document.getElementById("helpCloseBtn")
+  helpCloseBtn: document.getElementById("helpCloseBtn"),
+  toast: document.getElementById("toast"),
+  undoBtn: document.getElementById("undoBtn"),
+  redoBtn: document.getElementById("redoBtn")
 };
 
 const presets = ["(가)", "(나)", "(다)", "(라)", "A", "B", "C", "D", "㉠", "㉡", "㉢", "㉣", "①", "②", "③", "④"];
+const presetButtons = new Map();
 
 const state = {
   image: null,
   imageDataUrl: "",
   imageName: "mock-exam-image",
   imagePath: "",
+  projectPath: "",
   labels: [],
   selectedId: null,
   nextId: 1,
   zoom: 1,
   mode: "select",
-  dragging: null
+  dragging: null,
+  dirty: false,
+  pendingText: "(가)",
+  activePreset: "",
+  toastTimer: null,
+  history: {
+    undo: [],
+    redo: [],
+    applying: false
+  }
 };
 
 function setStatus(text) {
   els.status.textContent = text;
+}
+
+function cloneLabels(labels = state.labels) {
+  return JSON.parse(JSON.stringify(labels));
+}
+
+function setDirty(dirty) {
+  state.dirty = Boolean(dirty);
+  window.labeler.setDirtyState(state.dirty);
+}
+
+function snapshotState() {
+  return {
+    labels: cloneLabels(),
+    selectedId: state.selectedId,
+    nextId: state.nextId
+  };
+}
+
+function restoreSnapshot(snapshot) {
+  state.history.applying = true;
+  state.labels = cloneLabels(snapshot.labels);
+  state.selectedId = snapshot.selectedId;
+  state.nextId = snapshot.nextId;
+  state.history.applying = false;
+  setDirty(true);
+  render();
+}
+
+function updateHistoryButtons() {
+  els.undoBtn.disabled = state.history.undo.length === 0;
+  els.redoBtn.disabled = state.history.redo.length === 0;
+}
+
+function pushHistory() {
+  if (state.history.applying || !state.image) return;
+  state.history.undo.push(snapshotState());
+  if (state.history.undo.length > 80) state.history.undo.shift();
+  state.history.redo = [];
+  updateHistoryButtons();
+}
+
+function clearHistory() {
+  state.history.undo = [];
+  state.history.redo = [];
+  updateHistoryButtons();
+}
+
+function undo() {
+  if (state.history.undo.length === 0) return;
+  const current = snapshotState();
+  const previous = state.history.undo.pop();
+  state.history.redo.push(current);
+  restoreSnapshot(previous);
+  updateHistoryButtons();
+}
+
+function redo() {
+  if (state.history.redo.length === 0) return;
+  const current = snapshotState();
+  const next = state.history.redo.pop();
+  state.history.undo.push(current);
+  restoreSnapshot(next);
+  updateHistoryButtons();
+}
+
+function setPressed(button, pressed) {
+  button.classList.toggle("active", Boolean(pressed));
+  button.setAttribute("aria-pressed", String(Boolean(pressed)));
+}
+
+function isPressed(button) {
+  return button.classList.contains("active");
+}
+
+function showToast(text) {
+  window.clearTimeout(state.toastTimer);
+  els.toast.textContent = text;
+  els.toast.hidden = false;
+  state.toastTimer = window.setTimeout(() => {
+    els.toast.hidden = true;
+  }, 2400);
+}
+
+function requireImage() {
+  if (state.image) return true;
+  showToast("이미지를 먼저 업로드해주세요.");
+  return false;
+}
+
+function beginLabelPlacement(text, preset = "", notify = true) {
+  state.pendingText = text || "(가)";
+  state.activePreset = preset;
+  if (!state.image) {
+    setAddMode(false);
+    if (notify) requireImage();
+    return;
+  }
+  setAddMode(true);
 }
 
 function selectedLabel() {
@@ -311,6 +421,7 @@ function render() {
     dropEmpty.style.display = "grid";
     updateLabelList();
     updateInspector();
+    updateHistoryButtons();
     return;
   }
 
@@ -323,6 +434,7 @@ function render() {
   drawTo(canvas, { includeSelection: true });
   updateLabelList();
   updateInspector();
+  updateHistoryButtons();
   setStatus(`${canvas.width}×${canvas.height}px · ${Math.round(state.zoom * 100)}% · 라벨 ${state.labels.length}개`);
 }
 
@@ -339,7 +451,7 @@ function makeLabel(x, y, text) {
   const style = labelStyleFromControls();
   return {
     id: state.nextId++,
-    text: text || els.labelText.value || "(가)",
+    text: text || state.pendingText || els.labelText.value || "(가)",
     x,
     y,
     ...style,
@@ -361,7 +473,11 @@ function makeLeaderLabel(startX, startY, endX, endY, text) {
 
 function setAddMode(active) {
   state.mode = active ? "add" : "select";
-  els.addModeBtn.textContent = active ? "추가 중" : "지시선 추가";
+  els.labelText.classList.toggle("active-input", active && !state.activePreset);
+  for (const [preset, button] of presetButtons.entries()) {
+    button.classList.toggle("active", active && preset === state.activePreset);
+  }
+  if (active) showToast("원하는 그림 영역을 누르고 드래그하세요!");
 }
 
 function addLabelAt(x, y, text) {
@@ -466,7 +582,6 @@ function updateInspector() {
   els.selectedText.disabled = disabled;
   els.selectedX.disabled = disabled;
   els.selectedY.disabled = disabled;
-  els.centerSelectedBtn.disabled = disabled;
   els.duplicateBtn.disabled = disabled;
   els.deleteBtn.disabled = disabled;
   els.applyStyleAllBtn.disabled = state.labels.length === 0;
@@ -483,7 +598,7 @@ function updateInspector() {
     els.selectedText.value = "";
     els.selectedX.value = "";
     els.selectedY.value = "";
-    els.leaderEnabled.checked = false;
+    setPressed(els.leaderEnabled, false);
     els.leaderWidthValue.textContent = els.leaderWidth.value;
     els.leaderGapValue.textContent = els.leaderGap.value;
     els.leaderX.value = "";
@@ -501,11 +616,11 @@ function updateInspector() {
   els.labelPaddingValue.textContent = String(Number.isFinite(label.padding) ? label.padding : 8);
   els.textColor.value = label.color || "#111111";
   els.labelBackground.value = label.background || "none";
-  els.boldText.checked = Boolean(label.bold);
-  els.italicText.checked = Boolean(label.italic);
-  els.underlineText.checked = Boolean(label.underline);
-  els.outlineText.checked = label.outline !== false;
-  els.leaderEnabled.checked = leader.enabled;
+  setPressed(els.boldText, Boolean(label.bold));
+  setPressed(els.italicText, Boolean(label.italic));
+  setPressed(els.underlineText, Boolean(label.underline));
+  setPressed(els.outlineText, label.outline !== false);
+  setPressed(els.leaderEnabled, leader.enabled);
   els.leaderShape.value = leader.shape;
   els.leaderStyle.value = leader.style;
   els.leaderWidth.value = leader.width;
@@ -537,16 +652,20 @@ async function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "
     state.imageDataUrl = dataUrl;
     state.imageName = fileName || "mock-exam-image";
     state.imagePath = filePath;
+    state.projectPath = "";
     state.labels = [];
     state.selectedId = null;
     state.nextId = 1;
+    setAddMode(false);
+    clearHistory();
+    setDirty(false);
     els.fileName.textContent = `${state.imageName} · ${image.naturalWidth}×${image.naturalHeight}px`;
     fitZoom();
   };
   image.src = dataUrl;
 }
 
-async function loadProject(project) {
+async function loadProject(project, filePath = "") {
   if (!project || !project.imageDataUrl) return;
   const image = new Image();
   image.onload = () => {
@@ -554,9 +673,13 @@ async function loadProject(project) {
     state.imageDataUrl = project.imageDataUrl;
     state.imageName = project.imageName || "mock-exam-image";
     state.imagePath = project.imagePath || "";
+    state.projectPath = filePath;
     state.labels = Array.isArray(project.labels) ? project.labels : [];
     state.selectedId = null;
     state.nextId = Math.max(1, ...state.labels.map((label) => Number(label.id) || 0)) + 1;
+    setAddMode(false);
+    clearHistory();
+    setDirty(false);
     els.fileName.textContent = `${state.imageName} · ${image.naturalWidth}×${image.naturalHeight}px`;
     fitZoom();
   };
@@ -585,44 +708,29 @@ function safeBaseName() {
   return (state.imageName || "mock-exam-image").replace(/[\\/:*?"<>|]+/g, "_");
 }
 
-async function exportOne(kind) {
-  if (!state.image) return;
+async function saveImage() {
+  if (!requireImage()) return;
   const base = safeBaseName();
-  const map = {
-    labeled: {
-      dataUrl: exportCanvas(true, true),
-      defaultName: `${base}_labeled.png`,
-      title: "라벨 포함 PNG 저장"
-    },
-    blank: {
-      dataUrl: exportCanvas(true, false),
-      defaultName: `${base}_blank.png`,
-      title: "라벨 없음 PNG 저장"
-    },
-    labelsOnly: {
-      dataUrl: exportCanvas(false, true),
-      defaultName: `${base}_labels_only.png`,
-      title: "라벨만 PNG 저장"
-    }
-  };
-  const saved = await window.labeler.saveDataUrl(map[kind]);
-  if (saved) setStatus(`저장 완료: ${saved}`);
-}
-
-async function exportPair() {
-  if (!state.image) return;
-  const base = safeBaseName();
-  const saved = await window.labeler.saveExportSet({
-    files: [
-      { name: `${base}_labeled.png`, dataUrl: exportCanvas(true, true) },
-      { name: `${base}_blank.png`, dataUrl: exportCanvas(true, false) }
-    ]
+  const saved = await window.labeler.saveDataUrl({
+    dataUrl: exportCanvas(true, true),
+    defaultName: `${base}_labeled.png`,
+    title: "이미지 저장"
   });
-  if (saved) setStatus(`2개 저장 완료: ${saved.length}개 파일`);
+  if (saved) {
+    setStatus(`이미지 저장 완료: ${saved}`);
+    showToast("라벨 포함 이미지가 저장되었습니다.");
+  }
 }
 
 function readDroppedFile(file) {
-  if (!file || !file.type.startsWith("image/")) return;
+  if (!file) return;
+  if (file.name.toLowerCase().endsWith(".melp")) {
+    const reader = new FileReader();
+    reader.onload = () => loadProject(JSON.parse(reader.result), "");
+    reader.readAsText(file, "utf-8");
+    return;
+  }
+  if (!file.type.startsWith("image/")) return;
   const reader = new FileReader();
   reader.onload = () => loadImageData(reader.result, file.name.replace(/\.[^.]+$/, ""), "");
   reader.readAsDataURL(file);
@@ -630,25 +738,31 @@ function readDroppedFile(file) {
 
 function deleteSelected() {
   if (!state.selectedId) return;
+  pushHistory();
   state.labels = state.labels.filter((label) => label.id !== state.selectedId);
   state.selectedId = null;
+  setDirty(true);
   render();
 }
 
 function duplicateSelected() {
   const label = selectedLabel();
   if (!label) return;
-  const copy = { ...label, id: state.nextId++, x: label.x + 16, y: label.y + 16 };
+  pushHistory();
+  const copy = JSON.parse(JSON.stringify({ ...label, id: state.nextId++, x: label.x + 16, y: label.y + 16 }));
   state.labels.push(copy);
   state.selectedId = copy.id;
+  setDirty(true);
   render();
 }
 
 function moveSelected(dx, dy) {
   const label = selectedLabel();
   if (!label) return;
+  pushHistory();
   label.x = Math.round(label.x + dx);
   label.y = Math.round(label.y + dy);
+  setDirty(true);
   render();
 }
 
@@ -657,8 +771,10 @@ for (const preset of presets) {
   button.textContent = preset;
   button.addEventListener("click", () => {
     els.labelText.value = preset;
+    beginLabelPlacement(preset, preset, true);
   });
   els.presetGrid.appendChild(button);
+  presetButtons.set(preset, button);
 }
 
 els.openImageBtn.addEventListener("click", async () => {
@@ -668,19 +784,25 @@ els.openImageBtn.addEventListener("click", async () => {
 
 els.openProjectBtn.addEventListener("click", async () => {
   const result = await window.labeler.openProject();
-  if (result) loadProject(result.project);
+  if (result) loadProject(result.project, result.filePath);
 });
 
 els.saveProjectBtn.addEventListener("click", async () => {
-  if (!state.image) return;
+  if (!requireImage()) return;
   const saved = await window.labeler.saveProject({
     fileName: safeBaseName(),
+    imagePath: state.imagePath,
     project: projectPayload()
   });
-  if (saved) setStatus(`프로젝트 저장 완료: ${saved}`);
+  if (saved) {
+    state.projectPath = saved;
+    setDirty(false);
+    setStatus(`프로젝트 저장 완료: ${saved}`);
+    showToast("프로젝트가 저장되었습니다.");
+  }
 });
 
-els.exportPairBtn.addEventListener("click", exportPair);
+els.saveImageBtn.addEventListener("click", saveImage);
 
 els.helpBtn.addEventListener("click", () => {
   els.helpDialog.showModal();
@@ -694,20 +816,21 @@ els.helpDialog.addEventListener("click", (event) => {
   if (event.target === els.helpDialog) els.helpDialog.close();
 });
 
-els.addCenterBtn.addEventListener("click", () => {
-  if (!state.image) return;
-  addLabelAt(state.image.naturalWidth / 2 - 22, state.image.naturalHeight / 2 - 18);
+els.labelText.addEventListener("input", () => {
+  beginLabelPlacement(els.labelText.value || "(가)", "", false);
 });
 
-els.addModeBtn.addEventListener("click", () => {
-  setAddMode(state.mode !== "add");
+els.labelText.addEventListener("focus", () => {
+  beginLabelPlacement(els.labelText.value || "(가)", "", false);
 });
 
 els.fontSize.addEventListener("input", () => {
   els.fontSizeValue.textContent = els.fontSize.value;
   const label = selectedLabel();
   if (label) {
+    pushHistory();
     label.fontSize = Number(els.fontSize.value);
+    setDirty(true);
     render();
   }
 });
@@ -716,7 +839,9 @@ els.labelPadding.addEventListener("input", () => {
   els.labelPaddingValue.textContent = els.labelPadding.value;
   const label = selectedLabel();
   if (label) {
+    pushHistory();
     label.padding = Number(els.labelPadding.value);
+    setDirty(true);
     render();
   }
 });
@@ -728,10 +853,10 @@ function labelStyleFromControls() {
     fontFamily: resolveFontFamily(),
     color: els.textColor.value,
     background: els.labelBackground.value,
-    bold: els.boldText.checked,
-    italic: els.italicText.checked,
-    underline: els.underlineText.checked,
-    outline: els.outlineText.checked
+    bold: isPressed(els.boldText),
+    italic: isPressed(els.italicText),
+    underline: isPressed(els.underlineText),
+    outline: isPressed(els.outlineText)
   };
 }
 
@@ -744,17 +869,32 @@ function leaderStyleFromControls() {
   };
 }
 
-for (const control of [els.fontFamily, els.textColor, els.labelBackground, els.boldText, els.italicText, els.underlineText, els.outlineText]) {
+for (const control of [els.fontFamily, els.textColor, els.labelBackground]) {
   control.addEventListener("input", () => {
     const label = selectedLabel();
     if (!label) return;
+    pushHistory();
     Object.assign(label, labelStyleFromControls());
+    setDirty(true);
+    render();
+  });
+}
+
+for (const control of [els.boldText, els.italicText, els.underlineText, els.outlineText]) {
+  control.addEventListener("click", () => {
+    const label = selectedLabel();
+    setPressed(control, !isPressed(control));
+    if (!label) return;
+    pushHistory();
+    Object.assign(label, labelStyleFromControls());
+    setDirty(true);
     render();
   });
 }
 
 els.applyStyleAllBtn.addEventListener("click", () => {
   if (state.labels.length === 0) return;
+  pushHistory();
   const labelStyle = labelStyleFromControls();
   const leaderStyle = leaderStyleFromControls();
 
@@ -768,17 +908,19 @@ els.applyStyleAllBtn.addEventListener("click", () => {
   }
 
   render();
+  setDirty(true);
   setStatus(`현재 서식을 라벨 ${state.labels.length}개에 적용했습니다`);
 });
 
 function updateLeaderFromControls() {
   const label = selectedLabel();
   if (!label) return;
+  pushHistory();
   const existing = normalizedLeader(label);
   const bounds = labelBounds(label);
   label.leader = {
     ...existing,
-    enabled: els.leaderEnabled.checked,
+    enabled: isPressed(els.leaderEnabled),
     shape: els.leaderShape.value,
     style: els.leaderStyle.value,
     width: Number(els.leaderWidth.value),
@@ -794,19 +936,26 @@ function updateLeaderFromControls() {
   els.leaderGapValue.textContent = String(label.leader.gap);
   els.leaderX.value = Math.round(label.leader.x);
   els.leaderY.value = Math.round(label.leader.y);
+  setDirty(true);
   render();
 }
 
 for (const control of [els.leaderEnabled, els.leaderShape, els.leaderStyle, els.leaderWidth, els.leaderGap, els.leaderX, els.leaderY]) {
-  control.addEventListener("input", updateLeaderFromControls);
+  const eventName = control === els.leaderEnabled ? "click" : "input";
+  control.addEventListener(eventName, () => {
+    if (control === els.leaderEnabled) setPressed(control, !isPressed(control));
+    updateLeaderFromControls();
+  });
 }
 
 els.leaderClearBtn.addEventListener("click", () => {
   const label = selectedLabel();
   if (!label) return;
+  pushHistory();
   label.leader = { ...normalizedLeader(label), enabled: false };
   state.mode = "select";
   setAddMode(false);
+  setDirty(true);
   render();
 });
 
@@ -825,46 +974,46 @@ els.fitBtn.addEventListener("click", fitZoom);
 els.selectedText.addEventListener("input", () => {
   const label = selectedLabel();
   if (!label) return;
+  pushHistory();
   label.text = els.selectedText.value;
+  setDirty(true);
   render();
 });
 
 els.selectedX.addEventListener("input", () => {
   const label = selectedLabel();
   if (!label) return;
+  pushHistory();
   label.x = Number(els.selectedX.value);
+  setDirty(true);
   render();
 });
 
 els.selectedY.addEventListener("input", () => {
   const label = selectedLabel();
   if (!label) return;
+  pushHistory();
   label.y = Number(els.selectedY.value);
-  render();
-});
-
-els.centerSelectedBtn.addEventListener("click", () => {
-  const label = selectedLabel();
-  if (!label || !state.image) return;
-  const bounds = labelBounds(label);
-  label.x = Math.round((state.image.naturalWidth - bounds.width) / 2);
-  label.y = Math.round((state.image.naturalHeight - bounds.height) / 2);
+  setDirty(true);
   render();
 });
 
 els.duplicateBtn.addEventListener("click", duplicateSelected);
 els.deleteBtn.addEventListener("click", deleteSelected);
+els.undoBtn.addEventListener("click", undo);
+els.redoBtn.addEventListener("click", redo);
 
 canvas.addEventListener("pointerdown", (event) => {
   if (!state.image) return;
   const point = getCanvasPoint(event);
 
   if (state.mode === "add") {
+    pushHistory();
     const label = makeLeaderLabel(point.x, point.y, point.x + 48, point.y - 22);
     state.labels.push(label);
     state.selectedId = label.id;
     const bounds = labelBounds(label);
-    state.dragging = { type: "new-label", id: label.id, offsetX: bounds.width / 2, offsetY: bounds.height / 2 };
+    state.dragging = { type: "new-label", id: label.id, offsetX: bounds.width / 2, offsetY: bounds.height / 2, changed: true };
     canvas.setPointerCapture(event.pointerId);
     render();
     showMagnifier(event, point);
@@ -874,7 +1023,8 @@ canvas.addEventListener("pointerdown", (event) => {
   const leaderHit = hitLeader(point);
   if (leaderHit) {
     state.selectedId = leaderHit.id;
-    state.dragging = { type: "leader", id: leaderHit.id };
+    pushHistory();
+    state.dragging = { type: "leader", id: leaderHit.id, changed: false };
     canvas.setPointerCapture(event.pointerId);
     render();
     showMagnifier(event, point);
@@ -885,7 +1035,8 @@ canvas.addEventListener("pointerdown", (event) => {
   if (hit) {
     const bounds = labelBounds(hit);
     state.selectedId = hit.id;
-    state.dragging = { type: "label", id: hit.id, offsetX: point.x - bounds.x, offsetY: point.y - bounds.y };
+    pushHistory();
+    state.dragging = { type: "label", id: hit.id, offsetX: point.x - bounds.x, offsetY: point.y - bounds.y, changed: false };
     canvas.setPointerCapture(event.pointerId);
   } else {
     state.selectedId = null;
@@ -906,10 +1057,12 @@ canvas.addEventListener("pointermove", (event) => {
       x: Math.round(point.x),
       y: Math.round(point.y)
     };
+    state.dragging.changed = true;
     showMagnifier(event, point);
   } else {
     label.x = Math.round(point.x - state.dragging.offsetX);
     label.y = Math.round(point.y - state.dragging.offsetY);
+    state.dragging.changed = true;
   }
 
   render();
@@ -917,6 +1070,7 @@ canvas.addEventListener("pointermove", (event) => {
 
 canvas.addEventListener("pointerup", (event) => {
   if (state.dragging?.type === "new-label") setAddMode(false);
+  if (state.dragging?.changed) setDirty(true);
   state.dragging = null;
   hideMagnifier();
   try {
@@ -939,7 +1093,9 @@ canvas.addEventListener("dblclick", () => {
   if (!label) return;
   const next = window.prompt("라벨 문구", label.text);
   if (next !== null) {
+    pushHistory();
     label.text = next;
+    setDirty(true);
     render();
   }
 });
@@ -963,6 +1119,18 @@ document.addEventListener("keydown", (event) => {
   const tag = document.activeElement?.tagName;
   const typing = tag === "INPUT" || tag === "TEXTAREA";
 
+  if (event.ctrlKey && event.key.toLowerCase() === "z") {
+    event.preventDefault();
+    undo();
+    return;
+  }
+
+  if (event.ctrlKey && event.key.toLowerCase() === "y") {
+    event.preventDefault();
+    redo();
+    return;
+  }
+
   if (event.key === "Delete" && !typing) {
     deleteSelected();
   }
@@ -983,6 +1151,10 @@ document.addEventListener("keydown", (event) => {
 
 window.addEventListener("resize", () => {
   if (state.image) render();
+});
+
+window.labeler.onOpenProjectData((payload) => {
+  if (payload?.project) loadProject(payload.project, payload.filePath || "");
 });
 
 render();
