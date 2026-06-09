@@ -223,9 +223,11 @@ ipcMain.on("set-dirty-state", (_event, dirty) => {
 });
 
 ipcMain.handle("save-data-url", async (_event, payload) => {
+  const defaultName = payload.defaultName || "export.png";
+  const defaultPath = payload.imagePath ? path.join(path.dirname(payload.imagePath), defaultName) : defaultName;
   const result = await dialog.showSaveDialog(mainWindow, {
     title: payload.title || "PNG 저장",
-    defaultPath: payload.defaultName || "export.png",
+    defaultPath,
     filters: [
       { name: "PNG", extensions: ["png"] }
     ]

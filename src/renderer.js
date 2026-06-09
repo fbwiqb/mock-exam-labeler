@@ -90,9 +90,21 @@ function cloneLabels(labels = state.labels) {
   return JSON.parse(JSON.stringify(labels));
 }
 
+function updateFileName() {
+  if (!state.image) {
+    els.fileName.textContent = "이미지를 열어 시작하세요";
+    document.title = "모의고사 라벨러";
+    return;
+  }
+  const dirtyMark = state.dirty ? "* " : "";
+  els.fileName.textContent = `${dirtyMark}${state.imageName} · ${state.image.naturalWidth}×${state.image.naturalHeight}px`;
+  document.title = state.dirty ? "모의고사 라벨러 *" : "모의고사 라벨러";
+}
+
 function setDirty(dirty) {
   state.dirty = Boolean(dirty);
   window.labeler.setDirtyState(state.dirty);
+  updateFileName();
 }
 
 function snapshotState() {
@@ -473,6 +485,7 @@ function makeLeaderLabel(startX, startY, endX, endY, text) {
 
 function setAddMode(active) {
   state.mode = active ? "add" : "select";
+  canvasShell.classList.toggle("add-mode", active);
   els.labelText.classList.toggle("active-input", active && !state.activePreset);
   for (const [preset, button] of presetButtons.entries()) {
     button.classList.toggle("active", active && preset === state.activePreset);
@@ -567,7 +580,8 @@ function updateLabelList() {
   for (const label of state.labels) {
     const row = document.createElement("button");
     row.className = `label-row${label.id === state.selectedId ? " selected" : ""}`;
-    row.innerHTML = `<span>${escapeHtml(label.text)}</span><span>${Math.round(label.x)}, ${Math.round(label.y)}</span>`;
+    const leader = normalizedLeader(label);
+    row.innerHTML = `<span class="label-main"><span class="leader-badge${leader.enabled ? " on" : ""}">${leader.enabled ? "지시선" : "라벨"}</span><span class="label-text">${escapeHtml(label.text)}</span></span><span class="label-pos">${Math.round(label.x)}, ${Math.round(label.y)}</span>`;
     row.addEventListener("click", () => {
       state.selectedId = label.id;
       render();
@@ -659,7 +673,6 @@ async function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "
     setAddMode(false);
     clearHistory();
     setDirty(false);
-    els.fileName.textContent = `${state.imageName} · ${image.naturalWidth}×${image.naturalHeight}px`;
     fitZoom();
   };
   image.src = dataUrl;
@@ -680,7 +693,6 @@ async function loadProject(project, filePath = "") {
     setAddMode(false);
     clearHistory();
     setDirty(false);
-    els.fileName.textContent = `${state.imageName} · ${image.naturalWidth}×${image.naturalHeight}px`;
     fitZoom();
   };
   image.src = project.imageDataUrl;
@@ -714,6 +726,7 @@ async function saveImage() {
   const saved = await window.labeler.saveDataUrl({
     dataUrl: exportCanvas(true, true),
     defaultName: `${base}_labeled.png`,
+    imagePath: state.imagePath,
     title: "이미지 저장"
   });
   if (saved) {
