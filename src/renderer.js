@@ -24,6 +24,17 @@ const els = {
   italicText: document.getElementById("italicText"),
   underlineText: document.getElementById("underlineText"),
   outlineText: document.getElementById("outlineText"),
+  rectShapeBtn: document.getElementById("rectShapeBtn"),
+  ellipseShapeBtn: document.getElementById("ellipseShapeBtn"),
+  fillEnabledBtn: document.getElementById("fillEnabledBtn"),
+  fillColor: document.getElementById("fillColor"),
+  fillPickerBtn: document.getElementById("fillPickerBtn"),
+  strokeEnabledBtn: document.getElementById("strokeEnabledBtn"),
+  strokeColor: document.getElementById("strokeColor"),
+  strokePickerBtn: document.getElementById("strokePickerBtn"),
+  shapeStrokeWidth: document.getElementById("shapeStrokeWidth"),
+  shapeStrokeWidthValue: document.getElementById("shapeStrokeWidthValue"),
+  deleteShapeBtn: document.getElementById("deleteShapeBtn"),
   zoomOutBtn: document.getElementById("zoomOutBtn"),
   fitBtn: document.getElementById("fitBtn"),
   zoomInBtn: document.getElementById("zoomInBtn"),
@@ -66,10 +77,15 @@ const state = {
   imagePath: "",
   projectPath: "",
   labels: [],
+  shapes: [],
   selectedId: null,
+  selectedShapeId: null,
   nextId: 1,
+  nextShapeId: 1,
   zoom: 1,
   mode: "select",
+  shapeTool: "",
+  pickerTarget: "",
   dragging: null,
   dirty: false,
   pendingText: "(가)",
@@ -88,6 +104,10 @@ function setStatus(text) {
 
 function cloneLabels(labels = state.labels) {
   return JSON.parse(JSON.stringify(labels));
+}
+
+function cloneShapes(shapes = state.shapes) {
+  return JSON.parse(JSON.stringify(shapes));
 }
 
 function updateFileName() {
@@ -110,16 +130,22 @@ function setDirty(dirty) {
 function snapshotState() {
   return {
     labels: cloneLabels(),
+    shapes: cloneShapes(),
     selectedId: state.selectedId,
-    nextId: state.nextId
+    selectedShapeId: state.selectedShapeId,
+    nextId: state.nextId,
+    nextShapeId: state.nextShapeId
   };
 }
 
 function restoreSnapshot(snapshot) {
   state.history.applying = true;
   state.labels = cloneLabels(snapshot.labels);
+  state.shapes = cloneShapes(snapshot.shapes || []);
   state.selectedId = snapshot.selectedId;
+  state.selectedShapeId = snapshot.selectedShapeId || null;
   state.nextId = snapshot.nextId;
+  state.nextShapeId = snapshot.nextShapeId || 1;
   state.history.applying = false;
   setDirty(true);
   render();
@@ -282,6 +308,89 @@ function normalizedLeader(label) {
   return { ...defaultLeader(), ...(label.leader || {}) };
 }
 
+function shapeStyleFromControls() {
+  return {
+    fillEnabled: isPressed(els.fillEnabledBtn),
+    fillColor: els.fillColor.value,
+    strokeEnabled: isPressed(els.strokeEnabledBtn),
+    strokeColor: els.strokeColor.value,
+    strokeWidth: Number(els.shapeStrokeWidth.value)
+  };
+}
+
+function normalizedShapeRect(shape) {
+  const x = Math.min(shape.x, shape.x + shape.width);
+  const y = Math.min(shape.y, shape.y + shape.height);
+  return {
+    x,
+    y,
+    width: Math.abs(shape.width),
+    height: Math.abs(shape.height)
+  };
+}
+
+function drawShape(context, shape, selected = false) {
+  const rect = normalizedShapeRect(shape);
+  context.save();
+  context.lineJoin = "round";
+
+  if (shape.kind === "ellipse") {
+    context.beginPath();
+    context.ellipse(rect.x + rect.width / 2, rect.y + rect.height / 2, rect.width / 2, rect.height / 2, 0, 0, Math.PI * 2);
+  } else {
+    context.beginPath();
+    context.rect(rect.x, rect.y, rect.width, rect.height);
+  }
+
+  if (shape.fillEnabled) {
+    context.fillStyle = shape.fillColor || "#ffffff";
+    context.fill();
+  }
+
+  if (shape.strokeEnabled && shape.strokeWidth > 0) {
+    context.strokeStyle = shape.strokeColor || "#111111";
+    context.lineWidth = shape.strokeWidth;
+    context.stroke();
+  }
+
+  if (selected) {
+    context.strokeStyle = "#1f4c8f";
+    context.lineWidth = 1;
+    context.setLineDash([4, 3]);
+    context.strokeRect(rect.x - 4, rect.y - 4, rect.width + 8, rect.height + 8);
+    context.setLineDash([]);
+  }
+
+  context.restore();
+}
+
+function hitShape(point) {
+  for (let i = state.shapes.length - 1; i >= 0; i -= 1) {
+    const shape = state.shapes[i];
+    const rect = normalizedShapeRect(shape);
+    if (point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height) {
+      return shape;
+    }
+  }
+  return null;
+}
+
+function rgbToHex(r, g, b) {
+  return `#${[r, g, b].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function sampleImageColor(point) {
+  const sampleCanvas = document.createElement("canvas");
+  sampleCanvas.width = state.image.naturalWidth;
+  sampleCanvas.height = state.image.naturalHeight;
+  const sampleCtx = sampleCanvas.getContext("2d", { willReadFrequently: true });
+  sampleCtx.drawImage(state.image, 0, 0);
+  const x = Math.max(0, Math.min(sampleCanvas.width - 1, Math.round(point.x)));
+  const y = Math.max(0, Math.min(sampleCanvas.height - 1, Math.round(point.y)));
+  const pixel = sampleCtx.getImageData(x, y, 1, 1).data;
+  return rgbToHex(pixel[0], pixel[1], pixel[2]);
+}
+
 function labelAnchorPoint(label, leader, context = ctx) {
   const bounds = labelBounds(label, context);
   const cx = bounds.x + bounds.width / 2;
@@ -409,12 +518,19 @@ function drawLabel(context, label, selected = false) {
 function drawTo(targetCanvas, options = {}) {
   const includeImage = options.includeImage !== false;
   const includeLabels = options.includeLabels !== false;
+  const includeShapes = options.includeShapes !== false;
   const includeSelection = options.includeSelection === true;
   const targetCtx = targetCanvas.getContext("2d");
   targetCtx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
 
   if (includeImage && state.image) {
     targetCtx.drawImage(state.image, 0, 0);
+  }
+
+  if (includeShapes) {
+    for (const shape of state.shapes) {
+      drawShape(targetCtx, shape, includeSelection && shape.id === state.selectedShapeId);
+    }
   }
 
   if (includeLabels) {
@@ -433,6 +549,7 @@ function render() {
     dropEmpty.style.display = "grid";
     updateLabelList();
     updateInspector();
+    updateShapePanel();
     updateHistoryButtons();
     return;
   }
@@ -446,8 +563,9 @@ function render() {
   drawTo(canvas, { includeSelection: true });
   updateLabelList();
   updateInspector();
+  updateShapePanel();
   updateHistoryButtons();
-  setStatus(`${canvas.width}×${canvas.height}px · ${Math.round(state.zoom * 100)}% · 라벨 ${state.labels.length}개`);
+  setStatus(`${canvas.width}×${canvas.height}px · ${Math.round(state.zoom * 100)}% · 라벨 ${state.labels.length}개 · 도형 ${state.shapes.length}개`);
 }
 
 function fitZoom() {
@@ -514,12 +632,43 @@ function makeLeaderLabel(startX, startY, endX, endY, text) {
 
 function setAddMode(active) {
   state.mode = active ? "add" : "select";
+  if (active) {
+    state.shapeTool = "";
+    state.pickerTarget = "";
+  }
   canvasShell.classList.toggle("add-mode", active);
+  canvasShell.classList.remove("shape-mode", "picker-mode");
   els.labelText.classList.toggle("active-input", active && !state.activePreset);
   for (const [preset, button] of presetButtons.entries()) {
     button.classList.toggle("active", active && preset === state.activePreset);
   }
   if (active) showToast("원하는 그림 영역을 누르고 드래그하세요!");
+}
+
+function setShapeTool(tool) {
+  if (tool && !requireImage()) return;
+  state.mode = tool ? "shape" : "select";
+  state.shapeTool = tool;
+  state.pickerTarget = "";
+  canvasShell.classList.toggle("shape-mode", Boolean(tool));
+  canvasShell.classList.remove("add-mode", "picker-mode");
+  els.labelText.classList.remove("active-input");
+  for (const button of presetButtons.values()) button.classList.remove("active");
+  els.rectShapeBtn.classList.toggle("active", tool === "rectangle");
+  els.ellipseShapeBtn.classList.toggle("active", tool === "ellipse");
+  if (tool) showToast("도형을 넣을 영역을 드래그하세요.");
+}
+
+function setPickerMode(target) {
+  if (!requireImage()) return;
+  state.mode = "picker";
+  state.shapeTool = "";
+  state.pickerTarget = target;
+  canvasShell.classList.add("picker-mode");
+  canvasShell.classList.remove("add-mode", "shape-mode");
+  els.rectShapeBtn.classList.remove("active");
+  els.ellipseShapeBtn.classList.remove("active");
+  showToast(`${target === "fill" ? "채우기" : "경계선"} 색으로 사용할 지점을 클릭하세요.`);
 }
 
 function addLabelAt(x, y, text) {
@@ -613,6 +762,7 @@ function updateLabelList() {
     row.innerHTML = `<span class="label-main"><span class="leader-badge${leader.enabled ? " on" : ""}">${leader.enabled ? "지시선" : "라벨"}</span><span class="label-text">${escapeHtml(label.text)}</span></span><span class="label-pos">${Math.round(label.x)}, ${Math.round(label.y)}</span>`;
     row.addEventListener("click", () => {
       state.selectedId = label.id;
+      state.selectedShapeId = null;
       render();
     });
     els.labelList.appendChild(row);
@@ -678,6 +828,23 @@ function updateInspector() {
   }
 }
 
+function selectedShape() {
+  return state.shapes.find((shape) => shape.id === state.selectedShapeId) || null;
+}
+
+function updateShapePanel() {
+  const shape = selectedShape();
+  els.deleteShapeBtn.disabled = !shape;
+  els.shapeStrokeWidthValue.textContent = els.shapeStrokeWidth.value;
+  if (!shape) return;
+  setPressed(els.fillEnabledBtn, shape.fillEnabled);
+  setPressed(els.strokeEnabledBtn, shape.strokeEnabled);
+  els.fillColor.value = shape.fillColor || "#ffffff";
+  els.strokeColor.value = shape.strokeColor || "#111111";
+  els.shapeStrokeWidth.value = Number.isFinite(shape.strokeWidth) ? shape.strokeWidth : 2;
+  els.shapeStrokeWidthValue.textContent = String(els.shapeStrokeWidth.value);
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
@@ -697,8 +864,11 @@ async function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "
     state.imagePath = filePath;
     state.projectPath = "";
     state.labels = [];
+    state.shapes = [];
     state.selectedId = null;
+    state.selectedShapeId = null;
     state.nextId = 1;
+    state.nextShapeId = 1;
     setAddMode(false);
     clearHistory();
     setDirty(false);
@@ -717,8 +887,11 @@ async function loadProject(project, filePath = "") {
     state.imagePath = project.imagePath || "";
     state.projectPath = filePath;
     state.labels = Array.isArray(project.labels) ? project.labels : [];
+    state.shapes = Array.isArray(project.shapes) ? project.shapes : [];
     state.selectedId = null;
+    state.selectedShapeId = null;
     state.nextId = Math.max(1, ...state.labels.map((label) => Number(label.id) || 0)) + 1;
+    state.nextShapeId = Math.max(1, ...state.shapes.map((shape) => Number(shape.id) || 0)) + 1;
     setAddMode(false);
     clearHistory();
     setDirty(false);
@@ -733,7 +906,8 @@ function projectPayload() {
     imageName: state.imageName,
     imagePath: state.imagePath,
     imageDataUrl: state.imageDataUrl,
-    labels: state.labels
+    labels: state.labels,
+    shapes: state.shapes
   };
 }
 
@@ -791,10 +965,23 @@ async function readDroppedFile(file) {
 }
 
 function deleteSelected() {
+  if (state.selectedShapeId) {
+    deleteSelectedShape();
+    return;
+  }
   if (!state.selectedId) return;
   pushHistory();
   state.labels = state.labels.filter((label) => label.id !== state.selectedId);
   state.selectedId = null;
+  setDirty(true);
+  render();
+}
+
+function deleteSelectedShape() {
+  if (!state.selectedShapeId) return;
+  pushHistory();
+  state.shapes = state.shapes.filter((shape) => shape.id !== state.selectedShapeId);
+  state.selectedShapeId = null;
   setDirty(true);
   render();
 }
@@ -806,6 +993,7 @@ function duplicateSelected() {
   const copy = JSON.parse(JSON.stringify({ ...label, id: state.nextId++, x: label.x + 16, y: label.y + 16 }));
   state.labels.push(copy);
   state.selectedId = copy.id;
+  state.selectedShapeId = null;
   setDirty(true);
   render();
 }
@@ -1014,6 +1202,39 @@ els.leaderClearBtn.addEventListener("click", () => {
   render();
 });
 
+function updateSelectedShapeFromControls() {
+  els.shapeStrokeWidthValue.textContent = els.shapeStrokeWidth.value;
+  const shape = selectedShape();
+  if (!shape) return;
+  pushHistory();
+  Object.assign(shape, shapeStyleFromControls());
+  setDirty(true);
+  render();
+}
+
+els.rectShapeBtn.addEventListener("click", () => {
+  setShapeTool(state.shapeTool === "rectangle" ? "" : "rectangle");
+});
+
+els.ellipseShapeBtn.addEventListener("click", () => {
+  setShapeTool(state.shapeTool === "ellipse" ? "" : "ellipse");
+});
+
+for (const control of [els.fillEnabledBtn, els.strokeEnabledBtn]) {
+  control.addEventListener("click", () => {
+    setPressed(control, !isPressed(control));
+    updateSelectedShapeFromControls();
+  });
+}
+
+for (const control of [els.fillColor, els.strokeColor, els.shapeStrokeWidth]) {
+  control.addEventListener("input", updateSelectedShapeFromControls);
+}
+
+els.fillPickerBtn.addEventListener("click", () => setPickerMode("fill"));
+els.strokePickerBtn.addEventListener("click", () => setPickerMode("stroke"));
+els.deleteShapeBtn.addEventListener("click", deleteSelectedShape);
+
 els.zoomOutBtn.addEventListener("click", () => {
   setZoom(state.zoom / 1.2);
 });
@@ -1060,11 +1281,48 @@ canvas.addEventListener("pointerdown", (event) => {
   if (!state.image) return;
   const point = getCanvasPoint(event);
 
+  if (state.mode === "picker") {
+    const color = sampleImageColor(point);
+    if (state.pickerTarget === "fill") {
+      els.fillColor.value = color;
+    } else {
+      els.strokeColor.value = color;
+    }
+    updateSelectedShapeFromControls();
+    state.mode = "select";
+    state.pickerTarget = "";
+    canvasShell.classList.remove("picker-mode");
+    showToast(`${color} 색을 적용했습니다.`);
+    render();
+    return;
+  }
+
+  if (state.mode === "shape" && state.shapeTool) {
+    pushHistory();
+    const shape = {
+      id: state.nextShapeId++,
+      kind: state.shapeTool,
+      x: Math.round(point.x),
+      y: Math.round(point.y),
+      width: 1,
+      height: 1,
+      ...shapeStyleFromControls()
+    };
+    state.shapes.push(shape);
+    state.selectedShapeId = shape.id;
+    state.selectedId = null;
+    state.dragging = { type: "new-shape", id: shape.id, startX: point.x, startY: point.y, changed: true };
+    canvas.setPointerCapture(event.pointerId);
+    render();
+    return;
+  }
+
   if (state.mode === "add") {
     pushHistory();
     const label = makeLeaderLabel(point.x, point.y, point.x + 48, point.y - 22);
     state.labels.push(label);
     state.selectedId = label.id;
+    state.selectedShapeId = null;
     const bounds = labelBounds(label);
     state.dragging = { type: "new-label", id: label.id, offsetX: bounds.width / 2, offsetY: bounds.height / 2, changed: true };
     canvas.setPointerCapture(event.pointerId);
@@ -1076,6 +1334,7 @@ canvas.addEventListener("pointerdown", (event) => {
   const leaderHit = hitLeader(point);
   if (leaderHit) {
     state.selectedId = leaderHit.id;
+    state.selectedShapeId = null;
     pushHistory();
     state.dragging = { type: "leader", id: leaderHit.id, changed: false };
     canvas.setPointerCapture(event.pointerId);
@@ -1088,20 +1347,52 @@ canvas.addEventListener("pointerdown", (event) => {
   if (hit) {
     const bounds = labelBounds(hit);
     state.selectedId = hit.id;
+    state.selectedShapeId = null;
     pushHistory();
     state.dragging = { type: "label", id: hit.id, offsetX: point.x - bounds.x, offsetY: point.y - bounds.y, changed: false };
     canvas.setPointerCapture(event.pointerId);
   } else {
     state.selectedId = null;
+    const shapeHit = hitShape(point);
+    if (shapeHit) {
+      const rect = normalizedShapeRect(shapeHit);
+      state.selectedShapeId = shapeHit.id;
+      pushHistory();
+      state.dragging = { type: "shape", id: shapeHit.id, offsetX: point.x - rect.x, offsetY: point.y - rect.y, changed: false };
+      canvas.setPointerCapture(event.pointerId);
+    } else {
+      state.selectedShapeId = null;
+    }
   }
   render();
 });
 
 canvas.addEventListener("pointermove", (event) => {
   if (!state.dragging) return;
+  const point = getCanvasPoint(event);
+
+  if (state.dragging.type === "new-shape" || state.dragging.type === "shape") {
+    const shape = state.shapes.find((item) => item.id === state.dragging.id);
+    if (!shape) return;
+    if (state.dragging.type === "new-shape") {
+      shape.x = Math.round(state.dragging.startX);
+      shape.y = Math.round(state.dragging.startY);
+      shape.width = Math.round(point.x - state.dragging.startX);
+      shape.height = Math.round(point.y - state.dragging.startY);
+    } else {
+      const rect = normalizedShapeRect(shape);
+      const nextX = Math.round(point.x - state.dragging.offsetX);
+      const nextY = Math.round(point.y - state.dragging.offsetY);
+      shape.x += nextX - rect.x;
+      shape.y += nextY - rect.y;
+    }
+    state.dragging.changed = true;
+    render();
+    return;
+  }
+
   const label = state.labels.find((item) => item.id === state.dragging.id);
   if (!label) return;
-  const point = getCanvasPoint(event);
 
   if (state.dragging.type === "leader") {
     label.leader = {
@@ -1123,6 +1414,7 @@ canvas.addEventListener("pointermove", (event) => {
 
 canvas.addEventListener("pointerup", (event) => {
   if (state.dragging?.type === "new-label") setAddMode(false);
+  if (state.dragging?.type === "new-shape") setShapeTool("");
   if (state.dragging?.changed) setDirty(true);
   state.dragging = null;
   hideMagnifier();

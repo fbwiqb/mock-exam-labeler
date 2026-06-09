@@ -83,6 +83,30 @@
           </div>
           <button id="applyStyleAllBtn" class="wide">현재 서식 전체 적용</button>
         </section>
+
+        <section>
+          <h2>도형</h2>
+          <div class="shape-grid">
+            <button id="rectShapeBtn">사각형</button>
+            <button id="ellipseShapeBtn">타원</button>
+          </div>
+          <div class="shape-grid">
+            <button id="fillEnabledBtn" class="toggle-button active" aria-pressed="true">채우기</button>
+            <input id="fillColor" type="color" value="#ffffff" aria-label="채우기 색">
+            <button id="fillPickerBtn" title="채우기 색 스포이드">스포이드</button>
+          </div>
+          <div class="shape-grid">
+            <button id="strokeEnabledBtn" class="toggle-button active" aria-pressed="true">경계선</button>
+            <input id="strokeColor" type="color" value="#111111" aria-label="경계선 색">
+            <button id="strokePickerBtn" title="경계선 색 스포이드">스포이드</button>
+          </div>
+          <label class="range-label">
+            경계선 굵기
+            <span id="shapeStrokeWidthValue">2</span>
+            <input id="shapeStrokeWidth" type="range" min="0" max="12" value="2">
+          </label>
+          <button id="deleteShapeBtn" class="wide">선택 도형 삭제</button>
+        </section>
       </aside>
 
       <section class="workspace">
@@ -192,6 +216,8 @@
           <li>왼쪽의 라벨 버튼을 누르거나 문구를 입력하면 라벨 추가가 켜집니다.</li>
           <li>그림에서 가리킬 지점을 누른 채 라벨을 둘 곳까지 드래그합니다.</li>
           <li>라벨은 드래그해 옮기고, 지시선 끝점은 작은 핸들을 잡아 미세 조정합니다.</li>
+          <li>도형은 왼쪽 도형 패널에서 사각형/타원을 고른 뒤 드래그해 넣습니다.</li>
+          <li>스포이드로 그림의 배경색을 찍어 채우기나 경계선 색으로 사용할 수 있습니다.</li>
           <li>드래그 중 루페가 나타나 픽셀 위치를 확대해서 보여줍니다.</li>
           <li><strong>프로젝트 저장(.melp)</strong>은 다시 편집할 수 있는 원본이고, <strong>이미지 저장</strong>은 라벨이 합쳐진 PNG입니다.</li>
           <li>Ctrl+Z/Ctrl+Y 또는 아래쪽 아이콘으로 실행 취소와 다시 실행을 할 수 있습니다.</li>
@@ -199,9 +225,12 @@
       </div>
     </dialog>
     <footer class="app-footer">
-      <button id="undoBtn" class="icon-button" aria-label="실행 취소" title="실행 취소 (Ctrl+Z)">↶</button>
-      <button id="redoBtn" class="icon-button" aria-label="다시 실행" title="다시 실행 (Ctrl+Y)">↷</button>
-      <span>Ctrl+Z / Ctrl+Y</span>
+      <div class="footer-actions">
+        <button id="undoBtn" class="icon-button" aria-label="실행 취소" title="실행 취소 (Ctrl+Z)">↶</button>
+        <button id="redoBtn" class="icon-button" aria-label="다시 실행" title="다시 실행 (Ctrl+Y)">↷</button>
+        <span>Ctrl+Z / Ctrl+Y</span>
+      </div>
+      <span class="footer-copy">Developed by 신도경 · CNSA</span>
     </footer>
     <script src="./renderer.js"></script>
   </body>
