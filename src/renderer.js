@@ -459,6 +459,35 @@ function fitZoom() {
   render();
 }
 
+function setZoom(nextZoom, event = null) {
+  if (!state.image) return;
+  const previousZoom = state.zoom;
+  const next = Math.max(0.12, Math.min(4, nextZoom));
+  if (Math.abs(previousZoom - next) < 0.001) return;
+
+  let focal = null;
+  if (event) {
+    const canvasRect = canvas.getBoundingClientRect();
+    const shellRect = canvasShell.getBoundingClientRect();
+    focal = {
+      imageX: (event.clientX - canvasRect.left) / previousZoom,
+      imageY: (event.clientY - canvasRect.top) / previousZoom,
+      shellX: event.clientX - shellRect.left,
+      shellY: event.clientY - shellRect.top
+    };
+  }
+
+  state.zoom = next;
+  render();
+
+  if (focal) {
+    window.requestAnimationFrame(() => {
+      canvasShell.scrollLeft = Math.max(0, focal.imageX * next - focal.shellX);
+      canvasShell.scrollTop = Math.max(0, focal.imageY * next - focal.shellY);
+    });
+  }
+}
+
 function makeLabel(x, y, text) {
   const style = labelStyleFromControls();
   return {
@@ -727,6 +756,7 @@ async function saveImage() {
     dataUrl: exportCanvas(true, true),
     defaultName: `${base}_labeled.png`,
     imagePath: state.imagePath,
+    projectPath: state.projectPath,
     title: "이미지 저장"
   });
   if (saved) {
@@ -735,8 +765,19 @@ async function saveImage() {
   }
 }
 
-function readDroppedFile(file) {
+async function readDroppedFile(file) {
   if (!file) return;
+  const filePath = window.labeler.getPathForFile(file);
+  if (filePath) {
+    const opened = await window.labeler.openFilePath(filePath);
+    if (!opened) return;
+    if (opened.text) {
+      loadProject(JSON.parse(opened.text), opened.filePath);
+      return;
+    }
+    loadImageData(opened.dataUrl, opened.fileName, opened.filePath);
+    return;
+  }
   if (file.name.toLowerCase().endsWith(".melp")) {
     const reader = new FileReader();
     reader.onload = () => loadProject(JSON.parse(reader.result), "");
@@ -805,6 +846,7 @@ els.saveProjectBtn.addEventListener("click", async () => {
   const saved = await window.labeler.saveProject({
     fileName: safeBaseName(),
     imagePath: state.imagePath,
+    projectPath: state.projectPath,
     project: projectPayload()
   });
   if (saved) {
@@ -973,13 +1015,11 @@ els.leaderClearBtn.addEventListener("click", () => {
 });
 
 els.zoomOutBtn.addEventListener("click", () => {
-  state.zoom = Math.max(0.12, state.zoom / 1.2);
-  render();
+  setZoom(state.zoom / 1.2);
 });
 
 els.zoomInBtn.addEventListener("click", () => {
-  state.zoom = Math.min(4, state.zoom * 1.2);
-  render();
+  setZoom(state.zoom * 1.2);
 });
 
 els.fitBtn.addEventListener("click", fitZoom);
@@ -1127,6 +1167,14 @@ canvasShell.addEventListener("drop", (event) => {
   canvasShell.classList.remove("drag-over");
   readDroppedFile(event.dataTransfer.files[0]);
 });
+
+canvasShell.addEventListener("wheel", (event) => {
+  if (!event.ctrlKey || !state.image) return;
+  event.preventDefault();
+  const direction = event.deltaY < 0 ? 1 : -1;
+  const factor = direction > 0 ? 1.12 : 1 / 1.12;
+  setZoom(state.zoom * factor, event);
+}, { passive: false });
 
 document.addEventListener("keydown", (event) => {
   const tag = document.activeElement?.tagName;

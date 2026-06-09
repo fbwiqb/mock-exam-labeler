@@ -1,8 +1,10 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("labeler", {
   getSystemFonts: () => ipcRenderer.invoke("get-system-fonts"),
+  getPathForFile: (file) => webUtils?.getPathForFile(file) || file?.path || "",
   openImage: () => ipcRenderer.invoke("open-image"),
+  openFilePath: (filePath) => ipcRenderer.invoke("open-file-path", filePath),
   openProject: () => ipcRenderer.invoke("open-project"),
   saveProject: (payload) => ipcRenderer.invoke("save-project", payload),
   saveDataUrl: (payload) => ipcRenderer.invoke("save-data-url", payload),

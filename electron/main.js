@@ -140,6 +140,28 @@ ipcMain.handle("open-image", async () => {
   };
 });
 
+ipcMain.handle("open-file-path", async (_event, filePath) => {
+  if (!filePath) return null;
+  const ext = path.extname(filePath).toLowerCase();
+  const textExtensions = new Set([".melp", ".json"]);
+
+  if (textExtensions.has(ext)) {
+    const text = await fs.readFile(filePath, "utf8");
+    return {
+      filePath,
+      fileName: path.basename(filePath, ext),
+      text
+    };
+  }
+
+  const buffer = await fs.readFile(filePath);
+  return {
+    filePath,
+    fileName: path.basename(filePath, ext),
+    dataUrl: `data:${extensionToMime(filePath)};base64,${buffer.toString("base64")}`
+  };
+});
+
 ipcMain.handle("get-system-fonts", async () => {
   const command = `
     [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
@@ -185,26 +207,36 @@ ipcMain.handle("open-project", async () => {
 });
 
 ipcMain.handle("save-project", async (_event, payload) => {
-  const buttons = payload.imagePath ? ["그림과 같은 폴더", "위치 지정", "취소"] : ["위치 지정", "취소"];
+  const buttons = ["그림과 같은 폴더", "위치 지정", "취소"];
   const choice = await dialog.showMessageBox(mainWindow, {
     type: "question",
     title: "프로젝트 저장",
     message: "프로젝트를 어디에 저장할까요?",
     buttons,
     defaultId: 0,
-    cancelId: buttons.length - 1,
+    cancelId: 2,
     noLink: true
   });
 
-  if (choice.response === buttons.length - 1) return null;
+  if (choice.response === 2) return null;
   let filePath = "";
+  const sourcePath = payload.imagePath || payload.projectPath || "";
 
-  if (payload.imagePath && choice.response === 0) {
-    filePath = path.join(path.dirname(payload.imagePath), `${payload.fileName || "mock-exam-labels"}.melp`);
+  if (choice.response === 0 && sourcePath) {
+    filePath = path.join(path.dirname(sourcePath), `${payload.fileName || "mock-exam-labels"}.melp`);
   } else {
+    if (choice.response === 0 && !sourcePath) {
+      await dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "원본 경로 없음",
+        message: "원본 그림 경로를 알 수 없어 저장 위치를 직접 지정해주세요.",
+        buttons: ["확인"],
+        noLink: true
+      });
+    }
     const result = await dialog.showSaveDialog(mainWindow, {
       title: "프로젝트 저장",
-      defaultPath: `${payload.fileName || "mock-exam-labels"}.melp`,
+      defaultPath: sourcePath ? path.join(path.dirname(sourcePath), `${payload.fileName || "mock-exam-labels"}.melp`) : `${payload.fileName || "mock-exam-labels"}.melp`,
       filters: [
         { name: "Mock Exam Labeler Project", extensions: ["melp"] }
       ]
@@ -224,16 +256,43 @@ ipcMain.on("set-dirty-state", (_event, dirty) => {
 
 ipcMain.handle("save-data-url", async (_event, payload) => {
   const defaultName = payload.defaultName || "export.png";
-  const defaultPath = payload.imagePath ? path.join(path.dirname(payload.imagePath), defaultName) : defaultName;
-  const result = await dialog.showSaveDialog(mainWindow, {
+  const sourcePath = payload.imagePath || payload.projectPath || "";
+  const choice = await dialog.showMessageBox(mainWindow, {
+    type: "question",
     title: payload.title || "PNG 저장",
-    defaultPath,
-    filters: [
-      { name: "PNG", extensions: ["png"] }
-    ]
+    message: "이미지를 어디에 저장할까요?",
+    buttons: ["그림과 같은 폴더", "위치 지정", "취소"],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true
   });
 
-  if (result.canceled || !result.filePath) return null;
-  await fs.writeFile(result.filePath, dataUrlToBuffer(payload.dataUrl));
-  return result.filePath;
+  if (choice.response === 2) return null;
+  let filePath = "";
+
+  if (choice.response === 0 && sourcePath) {
+    filePath = path.join(path.dirname(sourcePath), defaultName);
+  } else {
+    if (choice.response === 0 && !sourcePath) {
+      await dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "원본 경로 없음",
+        message: "원본 그림 경로를 알 수 없어 저장 위치를 직접 지정해주세요.",
+        buttons: ["확인"],
+        noLink: true
+      });
+    }
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: payload.title || "PNG 저장",
+      defaultPath: sourcePath ? path.join(path.dirname(sourcePath), defaultName) : defaultName,
+      filters: [
+        { name: "PNG", extensions: ["png"] }
+      ]
+    });
+    if (result.canceled || !result.filePath) return null;
+    filePath = result.filePath;
+  }
+
+  await fs.writeFile(filePath, dataUrlToBuffer(payload.dataUrl));
+  return filePath;
 });
