@@ -64,7 +64,6 @@ const els = {
   leaderGapValue: document.getElementById("leaderGapValue"),
   leaderX: document.getElementById("leaderX"),
   leaderY: document.getElementById("leaderY"),
-  leaderClearBtn: document.getElementById("leaderClearBtn"),
   magnifier: document.getElementById("magnifier"),
   magnifierCanvas: document.getElementById("magnifierCanvas"),
   magnifierSize: document.getElementById("magnifierSize"),
@@ -73,6 +72,10 @@ const els = {
   helpBtn: document.getElementById("helpBtn"),
   helpDialog: document.getElementById("helpDialog"),
   helpCloseBtn: document.getElementById("helpCloseBtn"),
+  helpTitle: document.getElementById("helpTitle"),
+  helpPrevBtn: document.getElementById("helpPrevBtn"),
+  helpNextBtn: document.getElementById("helpNextBtn"),
+  helpPageInfo: document.getElementById("helpPageInfo"),
   toast: document.getElementById("toast"),
   undoBtn: document.getElementById("undoBtn"),
   redoBtn: document.getElementById("redoBtn")
@@ -841,6 +844,7 @@ function setShapeTool(tool) {
   state.shapeTool = tool;
   state.pickerTarget = "";
   state.polygonDraft = null;
+  hideMagnifier();
   canvasShell.classList.toggle("shape-mode", Boolean(tool));
   canvasShell.classList.remove("add-mode", "picker-mode");
   els.labelText.classList.remove("active-input");
@@ -908,7 +912,7 @@ function hitLeader(point) {
 function showMagnifier(event, point) {
   if (!state.image) return;
   const magnifierCtx = els.magnifierCanvas.getContext("2d", { willReadFrequently: true });
-  const sourceSize = 48;
+  const sourceSize = 80;
   const half = sourceSize / 2;
   const sx = Math.max(0, Math.min(canvas.width - sourceSize, Math.round(point.x - half)));
   const sy = Math.max(0, Math.min(canvas.height - sourceSize, Math.round(point.y - half)));
@@ -936,10 +940,8 @@ function showMagnifier(event, point) {
 
   els.magnifierSize.textContent = `${Math.round(point.x)} × ${Math.round(point.y)}`;
   els.magnifierMeta.textContent = `(${Math.round(point.x)}, ${Math.round(point.y)})${colorText}`;
-  const left = Math.min(window.innerWidth - 280, event.clientX + 18);
-  const top = Math.min(window.innerHeight - 220, event.clientY + 18);
-  els.magnifier.style.left = `${Math.max(8, left)}px`;
-  els.magnifier.style.top = `${Math.max(8, top)}px`;
+  els.magnifier.style.left = `${Math.max(8, window.innerWidth - 272)}px`;
+  els.magnifier.style.top = `${Math.max(8, window.innerHeight - 252)}px`;
   els.magnifier.hidden = false;
 }
 
@@ -982,7 +984,6 @@ function updateInspector() {
   els.leaderGap.disabled = disabled;
   els.leaderX.disabled = disabled;
   els.leaderY.disabled = disabled;
-  els.leaderClearBtn.disabled = disabled;
 
   if (!label) {
     els.selectedText.value = "";
@@ -1325,12 +1326,34 @@ els.saveProjectBtn.addEventListener("click", async () => {
 
 els.saveImageBtn.addEventListener("click", saveImage);
 
+const helpPages = Array.from(els.helpDialog.querySelectorAll(".help-page"));
+let helpPageIndex = 0;
+
+function showHelpPage(index) {
+  helpPageIndex = Math.max(0, Math.min(helpPages.length - 1, index));
+  helpPages.forEach((page, i) => page.classList.toggle("active", i === helpPageIndex));
+  const current = helpPages[helpPageIndex];
+  els.helpTitle.textContent = current?.dataset.title || "사용법";
+  els.helpPageInfo.textContent = `${helpPageIndex + 1} / ${helpPages.length}`;
+  els.helpPrevBtn.disabled = helpPageIndex === 0;
+  els.helpNextBtn.disabled = helpPageIndex === helpPages.length - 1;
+}
+
 els.helpBtn.addEventListener("click", () => {
+  showHelpPage(0);
   els.helpDialog.showModal();
 });
 
 els.helpCloseBtn.addEventListener("click", () => {
   els.helpDialog.close();
+});
+
+els.helpPrevBtn.addEventListener("click", () => showHelpPage(helpPageIndex - 1));
+els.helpNextBtn.addEventListener("click", () => showHelpPage(helpPageIndex + 1));
+
+els.helpDialog.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowLeft") showHelpPage(helpPageIndex - 1);
+  if (event.key === "ArrowRight") showHelpPage(helpPageIndex + 1);
 });
 
 els.helpDialog.addEventListener("click", (event) => {
@@ -1473,17 +1496,6 @@ for (const control of [els.leaderEnabled, els.leaderArrow, els.leaderArrowShape,
   });
 }
 
-els.leaderClearBtn.addEventListener("click", () => {
-  const label = selectedLabel();
-  if (!label) return;
-  pushHistory();
-  label.leader = { ...normalizedLeader(label), enabled: false };
-  state.mode = "select";
-  setAddMode(false);
-  setDirty(true);
-  render();
-});
-
 function updateSelectedShapeFromControls() {
   els.shapeStrokeWidthValue.textContent = els.shapeStrokeWidth.value;
   const shape = selectedShape();
@@ -1586,16 +1598,26 @@ canvas.addEventListener("pointerdown", (event) => {
   if (state.mode === "shape" && state.shapeTool === "polygon") {
     if (!state.polygonDraft) state.polygonDraft = { points: [], cursor: null };
     const draft = state.polygonDraft;
+    const hitDist = polygonCloseDistance();
     if (draft.points.length >= 3) {
       const first = draft.points[0];
-      if (Math.hypot(point.x - first.x, point.y - first.y) <= polygonCloseDistance()) {
+      if (Math.hypot(point.x - first.x, point.y - first.y) <= hitDist) {
         commitPolygon();
         return;
       }
     }
+    const existingIndex = draft.points.findIndex((vertex) => Math.hypot(point.x - vertex.x, point.y - vertex.y) <= hitDist);
+    if (existingIndex >= 0) {
+      draft.points.splice(existingIndex, 1);
+      if (draft.points.length === 0) state.polygonDraft = null;
+      render();
+      showMagnifier(event, point);
+      return;
+    }
     draft.points.push({ x: Math.round(point.x), y: Math.round(point.y) });
     draft.cursor = { x: point.x, y: point.y };
     render();
+    showMagnifier(event, point);
     return;
   }
 
@@ -1674,6 +1696,7 @@ canvas.addEventListener("pointermove", (event) => {
     const cursorPoint = getCanvasPoint(event);
     state.polygonDraft.cursor = { x: cursorPoint.x, y: cursorPoint.y };
     render();
+    showMagnifier(event, cursorPoint);
     return;
   }
   if (!state.dragging) return;
