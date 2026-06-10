@@ -286,8 +286,37 @@ input.active-input {
   margin: 7px 0;
 }
 
-.shape-grid:first-of-type {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.shape-grid.shape-tools {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.style-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 9px 2px;
+}
+
+.style-checks .check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.style-checks input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .shape-grid input[type="color"] {

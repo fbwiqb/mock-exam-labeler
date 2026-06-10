@@ -38,7 +38,7 @@
         <section>
           <h2>모양</h2>
           <div class="field-grid">
-            <label>
+            <label class="span-2">
               글꼴
               <select id="fontFamily">
                 <option value="Batang, serif">바탕</option>
@@ -49,12 +49,12 @@
                 <option value="Cambria, serif">Cambria</option>
               </select>
             </label>
-            <label class="range-label">
+            <label class="range-label span-2">
               글자 크기
               <span id="fontSizeValue">28</span>
               <input id="fontSize" type="range" min="12" max="72" value="28">
             </label>
-            <label class="range-label">
+            <label class="range-label span-2">
               주변 여백
               <span id="labelPaddingValue">8</span>
               <input id="labelPadding" type="range" min="0" max="24" value="8">
@@ -76,20 +76,21 @@
               </select>
             </label>
           </div>
-          <div class="toggle-grid">
-            <button id="boldText" class="toggle-button" aria-pressed="false">굵게</button>
-            <button id="italicText" class="toggle-button" aria-pressed="false">이탤릭</button>
-            <button id="underlineText" class="toggle-button" aria-pressed="false">밑줄</button>
-            <button id="outlineText" class="toggle-button active" aria-pressed="true">흰 외곽선</button>
+          <div class="style-checks">
+            <label class="check"><input id="boldText" type="checkbox">굵게</label>
+            <label class="check"><input id="italicText" type="checkbox">이탤릭</label>
+            <label class="check"><input id="underlineText" type="checkbox">밑줄</label>
+            <label class="check"><input id="outlineText" type="checkbox" checked>외곽선</label>
           </div>
           <button id="applyStyleAllBtn" class="wide">현재 서식 전체 적용</button>
         </section>
 
         <section>
           <h2>도형</h2>
-          <div class="shape-grid">
+          <div class="shape-grid shape-tools">
             <button id="rectShapeBtn">사각형</button>
             <button id="ellipseShapeBtn">타원</button>
+            <button id="polygonShapeBtn">자유형</button>
           </div>
           <div class="shape-grid">
             <button id="fillEnabledBtn" class="toggle-button active" aria-pressed="true">채우기</button>
@@ -290,6 +291,7 @@
           <li><strong>수식 넣기</strong> 버튼으로 작은 편집기를 열어 화학식을 조합합니다. <strong>_</strong>는 아래첨자, <strong>^</strong>는 위첨자이며 두 글자 이상은 중괄호로 묶습니다. 예: <code>H_2SO_4</code>, <code>Ca^{2+}</code>. 넣기를 누르면 프리셋처럼 그림에 드래그해 배치합니다.</li>
           <li>지시선의 <strong>화살표</strong> 버튼을 켜면 가리키는 지점에 화살촉이 표시되며 모양과 크기를 조절할 수 있습니다.</li>
           <li>도형은 왼쪽 도형 패널에서 사각형/타원을 고른 뒤 드래그해 넣습니다.</li>
+          <li><strong>자유형</strong>은 점을 차례로 클릭해 다각형을 그리고, 처음 점을 다시 클릭하면 완성됩니다. (Enter 완성 · Esc 취소 · Backspace 마지막 점 취소)</li>
           <li>스포이드로 그림의 배경색을 찍어 채우기나 경계선 색으로 사용할 수 있습니다.</li>
           <li>드래그 중 루페가 나타나 픽셀 위치를 확대해서 보여줍니다.</li>
           <li><strong>프로젝트 저장(.melp)</strong>은 다시 편집할 수 있는 원본이고, <strong>이미지 저장</strong>은 라벨이 합쳐진 PNG입니다.</li>

@@ -32,6 +32,7 @@ const els = {
   outlineText: document.getElementById("outlineText"),
   rectShapeBtn: document.getElementById("rectShapeBtn"),
   ellipseShapeBtn: document.getElementById("ellipseShapeBtn"),
+  polygonShapeBtn: document.getElementById("polygonShapeBtn"),
   fillEnabledBtn: document.getElementById("fillEnabledBtn"),
   fillColor: document.getElementById("fillColor"),
   fillPickerBtn: document.getElementById("fillPickerBtn"),
@@ -96,6 +97,7 @@ const state = {
   mode: "select",
   shapeTool: "",
   pickerTarget: "",
+  polygonDraft: null,
   dragging: null,
   dirty: false,
   pendingText: "(가)",
@@ -397,6 +399,13 @@ function shapeStyleFromControls() {
 }
 
 function normalizedShapeRect(shape) {
+  if (shape.kind === "polygon") {
+    const xs = shape.points.map((point) => point.x);
+    const ys = shape.points.map((point) => point.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    return { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY };
+  }
   const x = Math.min(shape.x, shape.x + shape.width);
   const y = Math.min(shape.y, shape.y + shape.height);
   return {
@@ -415,6 +424,13 @@ function drawShape(context, shape, selected = false) {
   if (shape.kind === "ellipse") {
     context.beginPath();
     context.ellipse(rect.x + rect.width / 2, rect.y + rect.height / 2, rect.width / 2, rect.height / 2, 0, 0, Math.PI * 2);
+  } else if (shape.kind === "polygon") {
+    context.beginPath();
+    shape.points.forEach((point, index) => {
+      if (index === 0) context.moveTo(point.x, point.y);
+      else context.lineTo(point.x, point.y);
+    });
+    context.closePath();
   } else {
     context.beginPath();
     context.rect(rect.x, rect.y, rect.width, rect.height);
@@ -451,6 +467,62 @@ function hitShape(point) {
     }
   }
   return null;
+}
+
+function polygonCloseDistance() {
+  return 12 / Math.max(state.zoom, 0.001);
+}
+
+function drawPolygonDraft(context) {
+  const draft = state.polygonDraft;
+  if (!draft || draft.points.length === 0) return;
+  const scale = 1 / Math.max(state.zoom, 0.001);
+  context.save();
+  context.strokeStyle = "#1f4c8f";
+  context.lineWidth = 1.5 * scale;
+  context.lineJoin = "round";
+  context.setLineDash([5 * scale, 3 * scale]);
+  context.beginPath();
+  draft.points.forEach((point, index) => {
+    if (index === 0) context.moveTo(point.x, point.y);
+    else context.lineTo(point.x, point.y);
+  });
+  if (draft.cursor) context.lineTo(draft.cursor.x, draft.cursor.y);
+  context.stroke();
+  context.setLineDash([]);
+  draft.points.forEach((point, index) => {
+    context.beginPath();
+    context.arc(point.x, point.y, (index === 0 ? 6 : 4) * scale, 0, Math.PI * 2);
+    context.fillStyle = index === 0 ? "#ffffff" : "#1f4c8f";
+    context.strokeStyle = "#1f4c8f";
+    context.lineWidth = 1.5 * scale;
+    context.fill();
+    context.stroke();
+  });
+  context.restore();
+}
+
+function commitPolygon() {
+  const draft = state.polygonDraft;
+  if (!draft || draft.points.length < 3) {
+    state.polygonDraft = null;
+    render();
+    return;
+  }
+  pushHistory();
+  const shape = {
+    id: state.nextShapeId++,
+    kind: "polygon",
+    points: draft.points.map((point) => ({ x: Math.round(point.x), y: Math.round(point.y) })),
+    ...shapeStyleFromControls()
+  };
+  state.shapes.push(shape);
+  state.selectedShapeId = shape.id;
+  state.selectedId = null;
+  state.polygonDraft = null;
+  setShapeTool("");
+  setDirty(true);
+  render();
 }
 
 function rgbToHex(r, g, b) {
@@ -677,6 +749,7 @@ function render() {
   canvas.style.display = "block";
   dropEmpty.style.display = "none";
   drawTo(canvas, { includeSelection: true });
+  drawPolygonDraft(ctx);
   updateLabelList();
   updateInspector();
   updateShapePanel();
@@ -751,6 +824,7 @@ function setAddMode(active) {
   if (active) {
     state.shapeTool = "";
     state.pickerTarget = "";
+    state.polygonDraft = null;
   }
   canvasShell.classList.toggle("add-mode", active);
   canvasShell.classList.remove("shape-mode", "picker-mode");
@@ -766,19 +840,23 @@ function setShapeTool(tool) {
   state.mode = tool ? "shape" : "select";
   state.shapeTool = tool;
   state.pickerTarget = "";
+  state.polygonDraft = null;
   canvasShell.classList.toggle("shape-mode", Boolean(tool));
   canvasShell.classList.remove("add-mode", "picker-mode");
   els.labelText.classList.remove("active-input");
   for (const button of presetButtons.values()) button.classList.remove("active");
   els.rectShapeBtn.classList.toggle("active", tool === "rectangle");
   els.ellipseShapeBtn.classList.toggle("active", tool === "ellipse");
-  if (tool) showToast("도형을 넣을 영역을 드래그하세요.");
+  els.polygonShapeBtn.classList.toggle("active", tool === "polygon");
+  if (tool === "polygon") showToast("점을 차례로 클릭하세요. 처음 점을 다시 누르면 완성됩니다.");
+  else if (tool) showToast("도형을 넣을 영역을 드래그하세요.");
 }
 
 function setPickerMode(target) {
   if (!requireImage()) return;
   state.mode = "picker";
   state.shapeTool = "";
+  state.polygonDraft = null;
   state.pickerTarget = target;
   canvasShell.classList.add("picker-mode");
   canvasShell.classList.remove("add-mode", "shape-mode");
@@ -930,10 +1008,10 @@ function updateInspector() {
   els.labelPaddingValue.textContent = String(Number.isFinite(label.padding) ? label.padding : 8);
   els.textColor.value = label.color || "#111111";
   els.labelBackground.value = label.background || "none";
-  setPressed(els.boldText, Boolean(label.bold));
-  setPressed(els.italicText, Boolean(label.italic));
-  setPressed(els.underlineText, Boolean(label.underline));
-  setPressed(els.outlineText, label.outline !== false);
+  els.boldText.checked = Boolean(label.bold);
+  els.italicText.checked = Boolean(label.italic);
+  els.underlineText.checked = Boolean(label.underline);
+  els.outlineText.checked = label.outline !== false;
   setPressed(els.leaderEnabled, leader.enabled);
   setPressed(els.leaderArrow, Boolean(leader.arrow));
   els.leaderArrowShape.value = leader.arrowShape || "filled";
@@ -992,6 +1070,7 @@ async function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "
     state.shapes = [];
     state.selectedId = null;
     state.selectedShapeId = null;
+    state.polygonDraft = null;
     state.nextId = 1;
     state.nextShapeId = 1;
     setAddMode(false);
@@ -1015,6 +1094,7 @@ async function loadProject(project, filePath = "") {
     state.shapes = Array.isArray(project.shapes) ? project.shapes : [];
     state.selectedId = null;
     state.selectedShapeId = null;
+    state.polygonDraft = null;
     state.nextId = Math.max(1, ...state.labels.map((label) => Number(label.id) || 0)) + 1;
     state.nextShapeId = Math.max(1, ...state.shapes.map((shape) => Number(shape.id) || 0)) + 1;
     setAddMode(false);
@@ -1294,10 +1374,10 @@ function labelStyleFromControls() {
     fontFamily: resolveFontFamily(),
     color: els.textColor.value,
     background: els.labelBackground.value,
-    bold: isPressed(els.boldText),
-    italic: isPressed(els.italicText),
-    underline: isPressed(els.underlineText),
-    outline: isPressed(els.outlineText)
+    bold: els.boldText.checked,
+    italic: els.italicText.checked,
+    underline: els.underlineText.checked,
+    outline: els.outlineText.checked
   };
 }
 
@@ -1322,9 +1402,8 @@ for (const control of [els.fontFamily, els.textColor, els.labelBackground]) {
 }
 
 for (const control of [els.boldText, els.italicText, els.underlineText, els.outlineText]) {
-  control.addEventListener("click", () => {
+  control.addEventListener("change", () => {
     const label = selectedLabel();
-    setPressed(control, !isPressed(control));
     if (!label) return;
     pushHistory();
     Object.assign(label, labelStyleFromControls());
@@ -1423,6 +1502,10 @@ els.ellipseShapeBtn.addEventListener("click", () => {
   setShapeTool(state.shapeTool === "ellipse" ? "" : "ellipse");
 });
 
+els.polygonShapeBtn.addEventListener("click", () => {
+  setShapeTool(state.shapeTool === "polygon" ? "" : "polygon");
+});
+
 for (const control of [els.fillEnabledBtn, els.strokeEnabledBtn]) {
   control.addEventListener("click", () => {
     setPressed(control, !isPressed(control));
@@ -1500,6 +1583,22 @@ canvas.addEventListener("pointerdown", (event) => {
     return;
   }
 
+  if (state.mode === "shape" && state.shapeTool === "polygon") {
+    if (!state.polygonDraft) state.polygonDraft = { points: [], cursor: null };
+    const draft = state.polygonDraft;
+    if (draft.points.length >= 3) {
+      const first = draft.points[0];
+      if (Math.hypot(point.x - first.x, point.y - first.y) <= polygonCloseDistance()) {
+        commitPolygon();
+        return;
+      }
+    }
+    draft.points.push({ x: Math.round(point.x), y: Math.round(point.y) });
+    draft.cursor = { x: point.x, y: point.y };
+    render();
+    return;
+  }
+
   if (state.mode === "shape" && state.shapeTool) {
     pushHistory();
     const shape = {
@@ -1571,6 +1670,12 @@ canvas.addEventListener("pointerdown", (event) => {
 });
 
 canvas.addEventListener("pointermove", (event) => {
+  if (state.polygonDraft && state.mode === "shape" && state.shapeTool === "polygon") {
+    const cursorPoint = getCanvasPoint(event);
+    state.polygonDraft.cursor = { x: cursorPoint.x, y: cursorPoint.y };
+    render();
+    return;
+  }
   if (!state.dragging) return;
   const point = getCanvasPoint(event);
 
@@ -1586,8 +1691,17 @@ canvas.addEventListener("pointermove", (event) => {
       const rect = normalizedShapeRect(shape);
       const nextX = Math.round(point.x - state.dragging.offsetX);
       const nextY = Math.round(point.y - state.dragging.offsetY);
-      shape.x += nextX - rect.x;
-      shape.y += nextY - rect.y;
+      const dx = nextX - rect.x;
+      const dy = nextY - rect.y;
+      if (shape.kind === "polygon") {
+        for (const vertex of shape.points) {
+          vertex.x += dx;
+          vertex.y += dy;
+        }
+      } else {
+        shape.x += dx;
+        shape.y += dy;
+      }
     }
     state.dragging.changed = true;
     render();
@@ -1674,6 +1788,27 @@ canvasShell.addEventListener("wheel", (event) => {
 document.addEventListener("keydown", (event) => {
   const tag = document.activeElement?.tagName;
   const typing = tag === "INPUT" || tag === "TEXTAREA";
+
+  if (state.polygonDraft) {
+    if (event.key === "Escape") {
+      state.polygonDraft = null;
+      setShapeTool("");
+      render();
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitPolygon();
+      return;
+    }
+    if (event.key === "Backspace" && !typing) {
+      event.preventDefault();
+      state.polygonDraft.points.pop();
+      if (state.polygonDraft.points.length === 0) state.polygonDraft = null;
+      render();
+      return;
+    }
+  }
 
   if (event.ctrlKey && event.key.toLowerCase() === "z") {
     event.preventDefault();
