@@ -164,6 +164,81 @@ input.active-input {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
+.formula {
+  padding: 16px 18px 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.formula header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.formula h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.formula-preview-wrap {
+  display: grid;
+  place-items: center;
+  min-height: 64px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f4f4f1;
+}
+
+#formulaPreview {
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  max-width: 100%;
+}
+
+.formula-keys {
+  display: grid;
+  gap: 7px;
+}
+
+.key-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.key-row .key-label {
+  flex: 0 0 auto;
+  width: 38px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.key-row button {
+  height: 28px;
+  min-width: 34px;
+  padding: 0 7px;
+}
+
+.formula-ref {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.formula-ref code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #ececea;
+  color: #222;
+  font-family: Consolas, monospace;
+}
+
 .field-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

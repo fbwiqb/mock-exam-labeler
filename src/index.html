@@ -32,6 +32,7 @@
           <h2>라벨</h2>
           <input id="labelText" type="text" value="(가)" autocomplete="off">
           <div class="preset-grid" id="presetGrid"></div>
+          <button id="formulaBtn" class="wide">수식 넣기 (화학식·첨자)</button>
         </section>
 
         <section>
@@ -157,7 +158,10 @@
 
         <section>
           <h2>지시선</h2>
-          <button id="leaderEnabled" class="toggle-button leader-toggle" aria-pressed="false">표시</button>
+          <div class="toggle-grid leader-toggle">
+            <button id="leaderEnabled" class="toggle-button" aria-pressed="false">표시</button>
+            <button id="leaderArrow" class="toggle-button" aria-pressed="false">화살표</button>
+          </div>
           <div class="field-grid">
             <label>
               형태
@@ -165,6 +169,18 @@
                 <option value="straight">직선</option>
                 <option value="elbow">꺾은선</option>
               </select>
+            </label>
+            <label>
+              화살표 모양
+              <select id="leaderArrowShape">
+                <option value="filled">채운 삼각형</option>
+                <option value="open">열린 화살촉</option>
+              </select>
+            </label>
+            <label class="range-label span-2">
+              화살표 크기
+              <span id="leaderArrowSizeValue">12</span>
+              <input id="leaderArrowSize" type="range" min="6" max="72" value="12">
             </label>
             <label>
               선 종류
@@ -179,7 +195,7 @@
               <span id="leaderWidthValue">2</span>
               <input id="leaderWidth" type="range" min="1" max="8" value="2">
             </label>
-            <label class="range-label">
+            <label class="range-label span-2">
               라벨 간격
               <span id="leaderGapValue">8</span>
               <input id="leaderGap" type="range" min="0" max="24" value="8">
@@ -205,6 +221,61 @@
       <div id="magnifierMeta" class="magnifier-meta">0, 0</div>
     </div>
     <div id="toast" class="toast" hidden></div>
+    <dialog id="formulaDialog">
+      <div class="formula">
+        <header>
+          <h2>수식 넣기</h2>
+          <button id="formulaCloseBtn">닫기</button>
+        </header>
+        <input id="formulaInput" type="text" placeholder="예: H_2SO_4, Ca^{2+}, 2H_2O → 2H_2 + O_2" autocomplete="off">
+        <div class="formula-preview-wrap"><canvas id="formulaPreview" width="48" height="40"></canvas></div>
+        <div class="formula-keys">
+          <div class="key-row">
+            <span class="key-label">첨자</span>
+            <button type="button" data-ins="_{}" data-caret="-1" title="아래첨자 _{ }">X₂</button>
+            <button type="button" data-ins="^{}" data-caret="-1" title="위첨자 ^{ }">X²</button>
+          </div>
+          <div class="key-row">
+            <span class="key-label">전하</span>
+            <button type="button" data-ins="^{+}">⁺</button>
+            <button type="button" data-ins="^{-}">⁻</button>
+            <button type="button" data-ins="^{2+}">²⁺</button>
+            <button type="button" data-ins="^{2-}">²⁻</button>
+            <button type="button" data-ins="^{3+}">³⁺</button>
+          </div>
+          <div class="key-row">
+            <span class="key-label">반응</span>
+            <button type="button" data-ins="→">→</button>
+            <button type="button" data-ins="⇌">⇌</button>
+            <button type="button" data-ins="⇄">⇄</button>
+            <button type="button" data-ins="↑">↑</button>
+            <button type="button" data-ins="↓">↓</button>
+            <button type="button" data-ins="Δ">Δ</button>
+            <button type="button" data-ins=" + ">＋</button>
+          </div>
+          <div class="key-row">
+            <span class="key-label">연산</span>
+            <button type="button" data-ins="×">×</button>
+            <button type="button" data-ins="÷">÷</button>
+            <button type="button" data-ins="±">±</button>
+            <button type="button" data-ins="≠">≠</button>
+            <button type="button" data-ins="≤">≤</button>
+            <button type="button" data-ins="≥">≥</button>
+            <button type="button" data-ins="∞">∞</button>
+            <button type="button" data-ins="√">√</button>
+          </div>
+        </div>
+        <div class="formula-ref">
+          <strong>입력 규칙</strong> — <code>_</code> 아래첨자, <code>^</code> 위첨자, 여러 글자는 <code>{ }</code>로 묶기. 예: <code>H_2SO_4</code>, <code>Ca^{2+}</code><br>
+          <strong>한글 IME 한자 단축키</strong> — 자음 한 글자 입력 후 한자 키:<br>
+          <code>ㄷ</code> + 한자 = 수학·연산 기호 (± × ÷ ≠ ≤ ≥ ∞ √ ∫ ∑ …)<br>
+          <code>ㄹ</code> + 한자 = 단위 (㎖ ㎗ ℓ ㎜ ㎝ ㎞ ㎏ ℃ Å …)<br>
+          <code>ㅁ</code> + 한자 = 일반 기호 (※ ☆ ★ ○ ● → ↑ …)<br>
+          <code>ㅇ</code> + 한자 = 원·괄호 문자 (① ② ㈀ ⑴ …)
+        </div>
+        <button id="formulaApplyBtn" class="primary wide">넣기</button>
+      </div>
+    </dialog>
     <dialog id="helpDialog">
       <div class="help">
         <header>
@@ -216,6 +287,8 @@
           <li>왼쪽의 라벨 버튼을 누르거나 문구를 입력하면 라벨 추가가 켜집니다.</li>
           <li>그림에서 가리킬 지점을 누른 채 라벨을 둘 곳까지 드래그합니다.</li>
           <li>라벨은 드래그해 옮기고, 지시선 끝점은 작은 핸들을 잡아 미세 조정합니다.</li>
+          <li><strong>수식 넣기</strong> 버튼으로 작은 편집기를 열어 화학식을 조합합니다. <strong>_</strong>는 아래첨자, <strong>^</strong>는 위첨자이며 두 글자 이상은 중괄호로 묶습니다. 예: <code>H_2SO_4</code>, <code>Ca^{2+}</code>. 넣기를 누르면 프리셋처럼 그림에 드래그해 배치합니다.</li>
+          <li>지시선의 <strong>화살표</strong> 버튼을 켜면 가리키는 지점에 화살촉이 표시되며 모양과 크기를 조절할 수 있습니다.</li>
           <li>도형은 왼쪽 도형 패널에서 사각형/타원을 고른 뒤 드래그해 넣습니다.</li>
           <li>스포이드로 그림의 배경색을 찍어 채우기나 경계선 색으로 사용할 수 있습니다.</li>
           <li>드래그 중 루페가 나타나 픽셀 위치를 확대해서 보여줍니다.</li>

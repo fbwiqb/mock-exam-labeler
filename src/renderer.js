@@ -12,6 +12,12 @@ const els = {
   saveImageBtn: document.getElementById("saveImageBtn"),
   labelText: document.getElementById("labelText"),
   presetGrid: document.getElementById("presetGrid"),
+  formulaBtn: document.getElementById("formulaBtn"),
+  formulaDialog: document.getElementById("formulaDialog"),
+  formulaCloseBtn: document.getElementById("formulaCloseBtn"),
+  formulaInput: document.getElementById("formulaInput"),
+  formulaPreview: document.getElementById("formulaPreview"),
+  formulaApplyBtn: document.getElementById("formulaApplyBtn"),
   applyStyleAllBtn: document.getElementById("applyStyleAllBtn"),
   fontFamily: document.getElementById("fontFamily"),
   fontSize: document.getElementById("fontSize"),
@@ -45,6 +51,10 @@ const els = {
   selectedX: document.getElementById("selectedX"),
   selectedY: document.getElementById("selectedY"),
   leaderEnabled: document.getElementById("leaderEnabled"),
+  leaderArrow: document.getElementById("leaderArrow"),
+  leaderArrowShape: document.getElementById("leaderArrowShape"),
+  leaderArrowSize: document.getElementById("leaderArrowSize"),
+  leaderArrowSizeValue: document.getElementById("leaderArrowSizeValue"),
   leaderShape: document.getElementById("leaderShape"),
   leaderStyle: document.getElementById("leaderStyle"),
   leaderWidth: document.getElementById("leaderWidth"),
@@ -274,22 +284,87 @@ async function populateFonts() {
   }
 }
 
-function labelFont(label) {
+function parseLabelRuns(text) {
+  const str = String(text == null ? "" : text);
+  const runs = [];
+  let normal = "";
+  let i = 0;
+  const flushNormal = () => {
+    if (normal) {
+      runs.push({ text: normal, type: "normal" });
+      normal = "";
+    }
+  };
+  while (i < str.length) {
+    const ch = str[i];
+    if (ch === "\\" && (str[i + 1] === "_" || str[i + 1] === "^" || str[i + 1] === "\\")) {
+      normal += str[i + 1];
+      i += 2;
+      continue;
+    }
+    if (ch === "_" || ch === "^") {
+      const type = ch === "_" ? "sub" : "super";
+      i += 1;
+      let chunk = "";
+      if (str[i] === "{") {
+        i += 1;
+        while (i < str.length && str[i] !== "}") {
+          if (str[i] === "\\" && str[i + 1] === "}") {
+            chunk += "}";
+            i += 2;
+            continue;
+          }
+          chunk += str[i];
+          i += 1;
+        }
+        if (str[i] === "}") i += 1;
+      } else if (i < str.length) {
+        chunk = str[i];
+        i += 1;
+      }
+      if (chunk) {
+        flushNormal();
+        runs.push({ text: chunk, type });
+      }
+      continue;
+    }
+    normal += ch;
+    i += 1;
+  }
+  flushNormal();
+  if (runs.length === 0) runs.push({ text: "", type: "normal" });
+  return runs;
+}
+
+function layoutLabel(label, context = ctx) {
+  const baseSize = label.fontSize;
+  const subSize = Math.max(8, Math.round(baseSize * 0.7));
   const weight = label.bold ? "700" : "400";
   const style = label.italic ? "italic" : "normal";
-  return `${style} ${weight} ${label.fontSize}px ${label.fontFamily || "Batang, serif"}`;
+  const family = label.fontFamily || "Batang, serif";
+  let cursor = 0;
+  const runs = parseLabelRuns(label.text).map((run) => {
+    const size = run.type === "normal" ? baseSize : subSize;
+    const font = `${style} ${weight} ${size}px ${family}`;
+    context.save();
+    context.font = font;
+    const width = context.measureText(run.text).width;
+    context.restore();
+    const dy = run.type === "sub" ? Math.round(baseSize * 0.3) : run.type === "super" ? -Math.round(baseSize * 0.1) : 0;
+    const item = { ...run, font, size, dx: cursor, width, dy };
+    cursor += width;
+    return item;
+  });
+  return { runs, totalWidth: cursor };
 }
 
 function labelBounds(label, context = ctx) {
-  context.save();
-  context.font = labelFont(label);
-  const metrics = context.measureText(label.text || " ");
-  context.restore();
+  const layout = layoutLabel(label, context);
   const padding = Number.isFinite(label.padding) ? label.padding : 8;
   const underlineExtra = label.underline ? Math.max(5, Math.round(label.fontSize * 0.18)) : 0;
-  const width = Math.ceil(metrics.width) + padding * 2;
+  const width = Math.ceil(layout.totalWidth) + padding * 2;
   const height = Math.ceil(label.fontSize * 1.25) + padding * 2 + underlineExtra;
-  return { x: label.x, y: label.y, width, height, padding, textWidth: metrics.width, underlineExtra };
+  return { x: label.x, y: label.y, width, height, padding, textWidth: layout.totalWidth, underlineExtra, layout };
 }
 
 function defaultLeader() {
@@ -300,7 +375,10 @@ function defaultLeader() {
     shape: "straight",
     style: "solid",
     width: 2,
-    gap: 8
+    gap: 8,
+    arrow: false,
+    arrowShape: "filled",
+    arrowSize: 12
   };
 }
 
@@ -453,6 +531,37 @@ function drawLeader(context, label, selected = false) {
   context.stroke();
   context.setLineDash([]);
 
+  if (leader.arrow) {
+    let fromX = end.x;
+    let fromY = end.y;
+    if (leader.shape === "elbow") {
+      fromX = leader.x + (end.x - leader.x) * 0.58;
+      fromY = leader.y;
+    }
+    const angle = Math.atan2(leader.y - fromY, leader.x - fromX);
+    const size = Number.isFinite(leader.arrowSize) ? leader.arrowSize : 12;
+    const spread = 0.42;
+    const back = angle + Math.PI;
+    const p1x = leader.x + Math.cos(back - spread) * size;
+    const p1y = leader.y + Math.sin(back - spread) * size;
+    const p2x = leader.x + Math.cos(back + spread) * size;
+    const p2y = leader.y + Math.sin(back + spread) * size;
+    context.fillStyle = "#111";
+    context.lineWidth = Math.max(1.4, leader.width);
+    context.beginPath();
+    context.moveTo(leader.x, leader.y);
+    context.lineTo(p1x, p1y);
+    if (leader.arrowShape === "open") {
+      context.moveTo(leader.x, leader.y);
+      context.lineTo(p2x, p2y);
+      context.stroke();
+    } else {
+      context.lineTo(p2x, p2y);
+      context.closePath();
+      context.fill();
+    }
+  }
+
   if (selected) {
     context.fillStyle = "#fff";
     context.strokeStyle = "#1f4c8f";
@@ -469,7 +578,6 @@ function drawLeader(context, label, selected = false) {
 function drawLabel(context, label, selected = false) {
   const bounds = labelBounds(label, context);
   context.save();
-  context.font = labelFont(label);
   context.textBaseline = "top";
   context.lineJoin = "round";
 
@@ -483,15 +591,23 @@ function drawLabel(context, label, selected = false) {
 
   const textX = bounds.x + bounds.padding;
   const textY = bounds.y + bounds.padding;
+  const outlineColor = label.color === "#ffffff" ? "#111111" : "#ffffff";
+  const outlineWidth = Math.max(3, Math.round(label.fontSize * 0.13));
 
-  if (label.outline) {
-    context.strokeStyle = label.color === "#ffffff" ? "#111111" : "#ffffff";
-    context.lineWidth = Math.max(3, Math.round(label.fontSize * 0.13));
-    context.strokeText(label.text, textX, textY);
+  for (const run of bounds.layout.runs) {
+    if (!run.text) continue;
+    const rx = textX + run.dx;
+    const ry = textY + run.dy;
+    context.font = run.font;
+    if (label.outline) {
+      context.strokeStyle = outlineColor;
+      context.lineWidth = outlineWidth;
+      context.lineJoin = "round";
+      context.strokeText(run.text, rx, ry);
+    }
+    context.fillStyle = label.color;
+    context.fillText(run.text, rx, ry);
   }
-
-  context.fillStyle = label.color;
-  context.fillText(label.text, textX, textY);
 
   if (label.underline) {
     const gap = Math.max(3, Math.round(label.fontSize * 0.14));
@@ -779,6 +895,9 @@ function updateInspector() {
   els.deleteBtn.disabled = disabled;
   els.applyStyleAllBtn.disabled = state.labels.length === 0;
   els.leaderEnabled.disabled = disabled;
+  els.leaderArrow.disabled = disabled;
+  els.leaderArrowShape.disabled = disabled;
+  els.leaderArrowSize.disabled = disabled;
   els.leaderShape.disabled = disabled;
   els.leaderStyle.disabled = disabled;
   els.leaderWidth.disabled = disabled;
@@ -792,8 +911,10 @@ function updateInspector() {
     els.selectedX.value = "";
     els.selectedY.value = "";
     setPressed(els.leaderEnabled, false);
+    setPressed(els.leaderArrow, false);
     els.leaderWidthValue.textContent = els.leaderWidth.value;
     els.leaderGapValue.textContent = els.leaderGap.value;
+    els.leaderArrowSizeValue.textContent = els.leaderArrowSize.value;
     els.leaderX.value = "";
     els.leaderY.value = "";
     return;
@@ -814,6 +935,10 @@ function updateInspector() {
   setPressed(els.underlineText, Boolean(label.underline));
   setPressed(els.outlineText, label.outline !== false);
   setPressed(els.leaderEnabled, leader.enabled);
+  setPressed(els.leaderArrow, Boolean(leader.arrow));
+  els.leaderArrowShape.value = leader.arrowShape || "filled";
+  els.leaderArrowSize.value = Number.isFinite(leader.arrowSize) ? leader.arrowSize : 12;
+  els.leaderArrowSizeValue.textContent = String(els.leaderArrowSize.value);
   els.leaderShape.value = leader.shape;
   els.leaderStyle.value = leader.style;
   els.leaderWidth.value = leader.width;
@@ -1019,6 +1144,79 @@ for (const preset of presets) {
   presetButtons.set(preset, button);
 }
 
+function renderFormulaPreview() {
+  const previewCtx = els.formulaPreview.getContext("2d");
+  const label = {
+    text: els.formulaInput.value,
+    x: 0,
+    y: 0,
+    fontSize: 30,
+    padding: 6,
+    fontFamily: resolveFontFamily(),
+    color: "#111111",
+    background: "none",
+    bold: false,
+    italic: false,
+    underline: false,
+    outline: false
+  };
+  const bounds = labelBounds(label, previewCtx);
+  els.formulaPreview.width = Math.max(48, bounds.width);
+  els.formulaPreview.height = Math.max(40, bounds.height);
+  previewCtx.clearRect(0, 0, els.formulaPreview.width, els.formulaPreview.height);
+  drawLabel(previewCtx, label, false);
+}
+
+function insertAtFormulaCaret(text, caretShift = 0) {
+  const input = els.formulaInput;
+  input.focus();
+  const start = input.selectionStart != null ? input.selectionStart : input.value.length;
+  const end = input.selectionEnd != null ? input.selectionEnd : input.value.length;
+  input.value = input.value.slice(0, start) + text + input.value.slice(end);
+  const pos = start + text.length + caretShift;
+  input.setSelectionRange(pos, pos);
+  renderFormulaPreview();
+}
+
+function applyFormula() {
+  const text = els.formulaInput.value;
+  if (!text.trim()) {
+    els.formulaDialog.close();
+    return;
+  }
+  els.labelText.value = text;
+  els.formulaDialog.close();
+  beginLabelPlacement(text, "", true);
+}
+
+els.formulaBtn.addEventListener("click", () => {
+  els.formulaInput.value = els.labelText.value;
+  els.formulaDialog.showModal();
+  renderFormulaPreview();
+  els.formulaInput.focus();
+  els.formulaInput.select();
+});
+
+els.formulaInput.addEventListener("input", renderFormulaPreview);
+els.formulaApplyBtn.addEventListener("click", applyFormula);
+els.formulaCloseBtn.addEventListener("click", () => els.formulaDialog.close());
+els.formulaDialog.addEventListener("click", (event) => {
+  if (event.target === els.formulaDialog) els.formulaDialog.close();
+});
+els.formulaInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    applyFormula();
+  }
+});
+
+els.formulaDialog.querySelectorAll(".key-row button").forEach((button) => {
+  button.addEventListener("mousedown", (event) => event.preventDefault());
+  button.addEventListener("click", () => {
+    insertAtFormulaCaret(button.dataset.ins || "", Number(button.dataset.caret || 0));
+  });
+});
+
 els.openImageBtn.addEventListener("click", async () => {
   const result = await window.labeler.openImage();
   if (result) loadImageData(result.dataUrl, result.fileName, result.filePath);
@@ -1164,6 +1362,9 @@ function updateLeaderFromControls() {
   label.leader = {
     ...existing,
     enabled: isPressed(els.leaderEnabled),
+    arrow: isPressed(els.leaderArrow),
+    arrowShape: els.leaderArrowShape.value,
+    arrowSize: Number(els.leaderArrowSize.value),
     shape: els.leaderShape.value,
     style: els.leaderStyle.value,
     width: Number(els.leaderWidth.value),
@@ -1177,16 +1378,18 @@ function updateLeaderFromControls() {
   }
   els.leaderWidthValue.textContent = String(label.leader.width);
   els.leaderGapValue.textContent = String(label.leader.gap);
+  els.leaderArrowSizeValue.textContent = String(label.leader.arrowSize);
   els.leaderX.value = Math.round(label.leader.x);
   els.leaderY.value = Math.round(label.leader.y);
   setDirty(true);
   render();
 }
 
-for (const control of [els.leaderEnabled, els.leaderShape, els.leaderStyle, els.leaderWidth, els.leaderGap, els.leaderX, els.leaderY]) {
-  const eventName = control === els.leaderEnabled ? "click" : "input";
+for (const control of [els.leaderEnabled, els.leaderArrow, els.leaderArrowShape, els.leaderArrowSize, els.leaderShape, els.leaderStyle, els.leaderWidth, els.leaderGap, els.leaderX, els.leaderY]) {
+  const isToggle = control === els.leaderEnabled || control === els.leaderArrow;
+  const eventName = isToggle ? "click" : "input";
   control.addEventListener(eventName, () => {
-    if (control === els.leaderEnabled) setPressed(control, !isPressed(control));
+    if (isToggle) setPressed(control, !isPressed(control));
     updateLeaderFromControls();
   });
 }
