@@ -21,7 +21,7 @@ const els = {
   applyStyleAllBtn: document.getElementById("applyStyleAllBtn"),
   fontFamily: document.getElementById("fontFamily"),
   fontSize: document.getElementById("fontSize"),
-  fontSizeValue: document.getElementById("fontSizeValue"),
+  fontSizeNumber: document.getElementById("fontSizeNumber"),
   labelPadding: document.getElementById("labelPadding"),
   labelPaddingValue: document.getElementById("labelPaddingValue"),
   textColor: document.getElementById("textColor"),
@@ -1003,8 +1003,8 @@ function updateInspector() {
   els.selectedText.value = label.text;
   els.selectedX.value = Math.round(label.x);
   els.selectedY.value = Math.round(label.y);
-  els.fontSize.value = label.fontSize;
-  els.fontSizeValue.textContent = String(label.fontSize);
+  els.fontSizeNumber.value = label.fontSize;
+  els.fontSize.value = Math.min(72, Math.max(12, label.fontSize));
   els.labelPadding.value = Number.isFinite(label.padding) ? label.padding : 8;
   els.labelPaddingValue.textContent = String(Number.isFinite(label.padding) ? label.padding : 8);
   els.textColor.value = label.color || "#111111";
@@ -1368,15 +1368,37 @@ els.labelText.addEventListener("focus", () => {
   beginLabelPlacement(els.labelText.value || "(가)", "", false);
 });
 
-els.fontSize.addEventListener("input", () => {
-  els.fontSizeValue.textContent = els.fontSize.value;
+function clampFontSize(value) {
+  const number = Math.round(Number(value));
+  if (!Number.isFinite(number)) return 28;
+  return Math.max(8, Math.min(1000, number));
+}
+
+function applyFontSize(value) {
   const label = selectedLabel();
-  if (label) {
-    pushHistory();
-    label.fontSize = Number(els.fontSize.value);
-    setDirty(true);
-    render();
-  }
+  if (!label) return;
+  pushHistory();
+  label.fontSize = value;
+  setDirty(true);
+  render();
+}
+
+els.fontSize.addEventListener("input", () => {
+  const value = clampFontSize(els.fontSize.value);
+  els.fontSizeNumber.value = value;
+  applyFontSize(value);
+});
+
+els.fontSizeNumber.addEventListener("input", () => {
+  const raw = Number(els.fontSizeNumber.value);
+  if (!Number.isFinite(raw) || raw <= 0) return;
+  const value = clampFontSize(raw);
+  els.fontSize.value = Math.min(72, Math.max(12, value));
+  applyFontSize(value);
+});
+
+els.fontSizeNumber.addEventListener("change", () => {
+  els.fontSizeNumber.value = clampFontSize(els.fontSizeNumber.value);
 });
 
 els.labelPadding.addEventListener("input", () => {
@@ -1392,7 +1414,7 @@ els.labelPadding.addEventListener("input", () => {
 
 function labelStyleFromControls() {
   return {
-    fontSize: Number(els.fontSize.value),
+    fontSize: clampFontSize(els.fontSizeNumber.value),
     padding: Number(els.labelPadding.value),
     fontFamily: resolveFontFamily(),
     color: els.textColor.value,

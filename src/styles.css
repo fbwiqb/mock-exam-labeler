@@ -264,6 +264,15 @@ input.active-input {
   font-size: 12px;
 }
 
+.range-label .num-inline {
+  grid-column: 2;
+  width: 60px;
+  height: 26px;
+  justify-self: end;
+  padding: 0 6px;
+  text-align: right;
+}
+
 .toggle-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
