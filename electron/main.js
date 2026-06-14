@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require("electron");
 const { execFile } = require("child_process");
+const { autoUpdater } = require("electron-updater");
 const fs = require("fs/promises");
 const path = require("path");
 
@@ -7,6 +8,59 @@ let mainWindow;
 let pendingProjectPath = null;
 let allowClose = false;
 let hasUnsavedChanges = false;
+
+function releaseNotesToText(notes) {
+  if (!notes) return "";
+  if (typeof notes === "string") return notes.replace(/<[^>]+>/g, "").trim();
+  if (Array.isArray(notes)) {
+    return notes.map((item) => (typeof item === "string" ? item : item && item.note ? item.note : "")).join("\n").trim();
+  }
+  return String(notes);
+}
+
+function setupAutoUpdate() {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("update-available", async (info) => {
+    const notes = releaseNotesToText(info.releaseNotes);
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "업데이트 있음",
+      message: `새 버전 ${info.version}이(가) 나왔습니다. 지금 받을까요?`,
+      detail: notes ? `이번 변경 내용\n\n${notes}` : "",
+      buttons: ["지금 업데이트", "나중에"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (result.response === 0) autoUpdater.downloadUpdate().catch((error) => console.error(error));
+  });
+
+  autoUpdater.on("update-downloaded", async (info) => {
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "업데이트 준비 완료",
+      message: `버전 ${info.version} 설치 준비가 끝났습니다.`,
+      detail: "지금 재시작하여 설치할까요? 저장하지 않은 작업이 있으면 먼저 저장하세요.",
+      buttons: ["지금 재시작하여 설치", "나중에"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (result.response === 0) {
+      allowClose = true;
+      setImmediate(() => autoUpdater.quitAndInstall());
+    }
+  });
+
+  autoUpdater.on("error", (error) => {
+    console.error("auto-update error", error);
+  });
+
+  autoUpdater.checkForUpdates().catch((error) => console.error(error));
+}
 
 function projectPathFromArgv(argv) {
   return argv.find((item) => String(item || "").toLowerCase().endsWith(".melp")) || null;
@@ -108,7 +162,10 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   pendingProjectPath = projectPathFromArgv(process.argv);
-  app.whenReady().then(createWindow);
+  app.whenReady().then(() => {
+    createWindow();
+    setupAutoUpdate();
+  });
 }
 
 app.on("window-all-closed", () => {
