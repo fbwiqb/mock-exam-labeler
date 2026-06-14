@@ -8,6 +8,19 @@ const els = {
   status: document.getElementById("status"),
   openImageBtn: document.getElementById("openImageBtn"),
   openProjectBtn: document.getElementById("openProjectBtn"),
+  knockoutBtn: document.getElementById("knockoutBtn"),
+  knockoutBar: document.getElementById("knockoutBar"),
+  knockoutTolerance: document.getElementById("knockoutTolerance"),
+  knockoutTolValue: document.getElementById("knockoutTolValue"),
+  knockoutDoneBtn: document.getElementById("knockoutDoneBtn"),
+  canvasResizeBtn: document.getElementById("canvasResizeBtn"),
+  resizeDialog: document.getElementById("resizeDialog"),
+  resizeCloseBtn: document.getElementById("resizeCloseBtn"),
+  resizeTop: document.getElementById("resizeTop"),
+  resizeBottom: document.getElementById("resizeBottom"),
+  resizeLeft: document.getElementById("resizeLeft"),
+  resizeRight: document.getElementById("resizeRight"),
+  resizeApplyBtn: document.getElementById("resizeApplyBtn"),
   saveProjectBtn: document.getElementById("saveProjectBtn"),
   saveImageBtn: document.getElementById("saveImageBtn"),
   labelText: document.getElementById("labelText"),
@@ -149,12 +162,12 @@ function snapshotState() {
     selectedId: state.selectedId,
     selectedShapeId: state.selectedShapeId,
     nextId: state.nextId,
-    nextShapeId: state.nextShapeId
+    nextShapeId: state.nextShapeId,
+    imageDataUrl: state.imageDataUrl
   };
 }
 
-function restoreSnapshot(snapshot) {
-  state.history.applying = true;
+function applySnapshotData(snapshot) {
   state.labels = cloneLabels(snapshot.labels);
   state.shapes = cloneShapes(snapshot.shapes || []);
   state.selectedId = snapshot.selectedId;
@@ -164,6 +177,21 @@ function restoreSnapshot(snapshot) {
   state.history.applying = false;
   setDirty(true);
   render();
+}
+
+function restoreSnapshot(snapshot) {
+  state.history.applying = true;
+  if (snapshot.imageDataUrl && snapshot.imageDataUrl !== state.imageDataUrl) {
+    const image = new Image();
+    image.onload = () => {
+      state.image = image;
+      state.imageDataUrl = snapshot.imageDataUrl;
+      applySnapshotData(snapshot);
+    };
+    image.src = snapshot.imageDataUrl;
+  } else {
+    applySnapshotData(snapshot);
+  }
 }
 
 function updateHistoryButtons() {
@@ -544,6 +572,105 @@ function sampleImageColor(point) {
   return rgbToHex(pixel[0], pixel[1], pixel[2]);
 }
 
+function hexToRgb(hex) {
+  const value = String(hex).replace("#", "");
+  return [parseInt(value.slice(0, 2), 16), parseInt(value.slice(2, 4), 16), parseInt(value.slice(4, 6), 16)];
+}
+
+function setImageFromDataUrl(dataUrl, done) {
+  const image = new Image();
+  image.onload = () => {
+    state.image = image;
+    state.imageDataUrl = dataUrl;
+    if (done) done();
+  };
+  image.src = dataUrl;
+}
+
+function removeColorFromImage(targetHex, tolerance) {
+  if (!state.image) return;
+  const w = state.image.naturalWidth;
+  const h = state.image.naturalHeight;
+  const work = document.createElement("canvas");
+  work.width = w;
+  work.height = h;
+  const wctx = work.getContext("2d", { willReadFrequently: true });
+  wctx.drawImage(state.image, 0, 0);
+  const imageData = wctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  const [tr, tg, tb] = hexToRgb(targetHex);
+  const tol = Math.max(0, Number(tolerance) || 0);
+  let removed = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] === 0) continue;
+    const diff = Math.max(Math.abs(data[i] - tr), Math.abs(data[i + 1] - tg), Math.abs(data[i + 2] - tb));
+    if (diff <= tol) {
+      data[i + 3] = 0;
+      removed += 1;
+    }
+  }
+  if (removed === 0) {
+    showToast("그 색에 해당하는 픽셀이 없습니다.");
+    return;
+  }
+  wctx.putImageData(imageData, 0, 0);
+  pushHistory();
+  setImageFromDataUrl(work.toDataURL("image/png"), () => {
+    setDirty(true);
+    render();
+    showToast(`${removed.toLocaleString()}개 픽셀을 투명하게 만들었습니다.`);
+  });
+}
+
+function applyKnockout(point) {
+  removeColorFromImage(sampleImageColor(point), Number(els.knockoutTolerance.value));
+}
+
+function resizeCanvas(top, right, bottom, left, bg) {
+  if (!state.image) return;
+  top = Math.max(0, Math.round(top) || 0);
+  right = Math.max(0, Math.round(right) || 0);
+  bottom = Math.max(0, Math.round(bottom) || 0);
+  left = Math.max(0, Math.round(left) || 0);
+  if (top + right + bottom + left === 0) return;
+  const w = state.image.naturalWidth + left + right;
+  const h = state.image.naturalHeight + top + bottom;
+  const work = document.createElement("canvas");
+  work.width = w;
+  work.height = h;
+  const wctx = work.getContext("2d");
+  if (bg === "white") {
+    wctx.fillStyle = "#ffffff";
+    wctx.fillRect(0, 0, w, h);
+  }
+  wctx.drawImage(state.image, left, top);
+  pushHistory();
+  for (const label of state.labels) {
+    label.x += left;
+    label.y += top;
+    if (label.leader) {
+      label.leader.x = (label.leader.x || 0) + left;
+      label.leader.y = (label.leader.y || 0) + top;
+    }
+  }
+  for (const shape of state.shapes) {
+    if (shape.kind === "polygon") {
+      for (const vertex of shape.points) {
+        vertex.x += left;
+        vertex.y += top;
+      }
+    } else {
+      shape.x += left;
+      shape.y += top;
+    }
+  }
+  setImageFromDataUrl(work.toDataURL("image/png"), () => {
+    setDirty(true);
+    fitZoom();
+    showToast(`캔버스를 ${w}×${h}px로 늘렸습니다.`);
+  });
+}
+
 function labelAnchorPoint(label, leader, context = ctx) {
   const bounds = labelBounds(label, context);
   const cx = bounds.x + bounds.width / 2;
@@ -828,6 +955,7 @@ function setAddMode(active) {
     state.shapeTool = "";
     state.pickerTarget = "";
     state.polygonDraft = null;
+    exitKnockout();
   }
   canvasShell.classList.toggle("add-mode", active);
   canvasShell.classList.remove("shape-mode", "picker-mode");
@@ -845,6 +973,7 @@ function setShapeTool(tool) {
   state.pickerTarget = "";
   state.polygonDraft = null;
   hideMagnifier();
+  exitKnockout();
   canvasShell.classList.toggle("shape-mode", Boolean(tool));
   canvasShell.classList.remove("add-mode", "picker-mode");
   els.labelText.classList.remove("active-input");
@@ -866,7 +995,38 @@ function setPickerMode(target) {
   canvasShell.classList.remove("add-mode", "shape-mode");
   els.rectShapeBtn.classList.remove("active");
   els.ellipseShapeBtn.classList.remove("active");
+  exitKnockout();
   showToast(`${target === "fill" ? "채우기" : "경계선"} 색으로 사용할 지점을 클릭하세요.`);
+}
+
+function exitKnockout() {
+  els.knockoutBar.hidden = true;
+  els.knockoutBtn.classList.remove("active");
+  canvasShell.classList.remove("knockout-mode");
+}
+
+function setKnockoutMode(active) {
+  if (active && !requireImage()) return;
+  if (!active) {
+    state.mode = "select";
+    exitKnockout();
+    return;
+  }
+  state.mode = "knockout";
+  state.shapeTool = "";
+  state.pickerTarget = "";
+  state.polygonDraft = null;
+  hideMagnifier();
+  canvasShell.classList.remove("add-mode", "shape-mode", "picker-mode");
+  els.labelText.classList.remove("active-input");
+  for (const button of presetButtons.values()) button.classList.remove("active");
+  els.rectShapeBtn.classList.remove("active");
+  els.ellipseShapeBtn.classList.remove("active");
+  els.polygonShapeBtn.classList.remove("active");
+  canvasShell.classList.add("knockout-mode");
+  els.knockoutBar.hidden = false;
+  els.knockoutBtn.classList.add("active");
+  showToast("투명하게 만들 색을 클릭하세요.");
 }
 
 function addLabelAt(x, y, text) {
@@ -1075,6 +1235,7 @@ async function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "
     state.nextId = 1;
     state.nextShapeId = 1;
     setAddMode(false);
+    exitKnockout();
     clearHistory();
     setDirty(false);
     fitZoom();
@@ -1099,6 +1260,7 @@ async function loadProject(project, filePath = "") {
     state.nextId = Math.max(1, ...state.labels.map((label) => Number(label.id) || 0)) + 1;
     state.nextShapeId = Math.max(1, ...state.shapes.map((shape) => Number(shape.id) || 0)) + 1;
     setAddMode(false);
+    exitKnockout();
     clearHistory();
     setDirty(false);
     fitZoom();
@@ -1325,6 +1487,42 @@ els.saveProjectBtn.addEventListener("click", async () => {
 });
 
 els.saveImageBtn.addEventListener("click", saveImage);
+
+els.knockoutBtn.addEventListener("click", () => {
+  setKnockoutMode(state.mode !== "knockout");
+});
+
+els.knockoutDoneBtn.addEventListener("click", () => setKnockoutMode(false));
+
+els.knockoutTolerance.addEventListener("input", () => {
+  els.knockoutTolValue.textContent = els.knockoutTolerance.value;
+});
+
+els.canvasResizeBtn.addEventListener("click", () => {
+  if (!requireImage()) return;
+  els.resizeTop.value = 0;
+  els.resizeBottom.value = 0;
+  els.resizeLeft.value = 0;
+  els.resizeRight.value = 0;
+  els.resizeDialog.showModal();
+});
+
+els.resizeCloseBtn.addEventListener("click", () => els.resizeDialog.close());
+els.resizeDialog.addEventListener("click", (event) => {
+  if (event.target === els.resizeDialog) els.resizeDialog.close();
+});
+
+els.resizeApplyBtn.addEventListener("click", () => {
+  const bg = document.querySelector('input[name="resizeBg"]:checked');
+  resizeCanvas(
+    Number(els.resizeTop.value),
+    Number(els.resizeRight.value),
+    Number(els.resizeBottom.value),
+    Number(els.resizeLeft.value),
+    bg ? bg.value : "transparent"
+  );
+  els.resizeDialog.close();
+});
 
 const helpPages = Array.from(els.helpDialog.querySelectorAll(".help-page"));
 let helpPageIndex = 0;
@@ -1601,6 +1799,11 @@ canvas.addEventListener("pointerdown", (event) => {
   if (!state.image) return;
   const point = getCanvasPoint(event);
 
+  if (state.mode === "knockout") {
+    applyKnockout(point);
+    return;
+  }
+
   if (state.mode === "picker") {
     const color = sampleImageColor(point);
     if (state.pickerTarget === "fill") {
@@ -1833,6 +2036,11 @@ canvasShell.addEventListener("wheel", (event) => {
 document.addEventListener("keydown", (event) => {
   const tag = document.activeElement?.tagName;
   const typing = tag === "INPUT" || tag === "TEXTAREA";
+
+  if (state.mode === "knockout" && event.key === "Escape") {
+    setKnockoutMode(false);
+    return;
+  }
 
   if (state.polygonDraft) {
     if (event.key === "Escape") {

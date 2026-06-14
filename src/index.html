@@ -17,6 +17,8 @@
         <div class="header-actions">
           <button id="openImageBtn">이미지 열기</button>
           <button id="openProjectBtn">프로젝트 열기</button>
+          <button id="knockoutBtn" title="특정 색을 투명하게 (누끼)">누끼</button>
+          <button id="canvasResizeBtn" title="캔버스 여백 늘리기">캔버스</button>
         </div>
       </div>
       <div class="header-actions">
@@ -221,6 +223,32 @@
       <div id="magnifierMeta" class="magnifier-meta">0, 0</div>
     </div>
     <div id="toast" class="toast" hidden></div>
+    <div id="knockoutBar" class="knockout-bar" hidden>
+      <span class="knockout-hint">배경 투명 — 지울 색을 클릭하세요</span>
+      <label class="knockout-tol">오차 <span id="knockoutTolValue">30</span><input id="knockoutTolerance" type="range" min="0" max="120" value="30"></label>
+      <button id="knockoutDoneBtn">완료</button>
+    </div>
+    <dialog id="resizeDialog">
+      <div class="resize">
+        <header>
+          <h2>캔버스 늘리기</h2>
+          <button id="resizeCloseBtn">닫기</button>
+        </header>
+        <p class="resize-desc">각 방향으로 추가할 여백(px)을 입력하세요. 기존 라벨·도형은 함께 이동합니다.</p>
+        <div class="resize-grid">
+          <label class="resize-top">위<input id="resizeTop" type="number" min="0" value="0"></label>
+          <label class="resize-left">좌<input id="resizeLeft" type="number" min="0" value="0"></label>
+          <label class="resize-right">우<input id="resizeRight" type="number" min="0" value="0"></label>
+          <label class="resize-bottom">아래<input id="resizeBottom" type="number" min="0" value="0"></label>
+        </div>
+        <div class="resize-bg">
+          <span>여백 배경</span>
+          <label><input type="radio" name="resizeBg" value="transparent" checked>투명</label>
+          <label><input type="radio" name="resizeBg" value="white">흰색</label>
+        </div>
+        <button id="resizeApplyBtn" class="primary wide">적용</button>
+      </div>
+    </dialog>
     <dialog id="formulaDialog">
       <div class="formula">
         <header>
@@ -293,6 +321,7 @@
               <li><strong>이미지 저장</strong>은 라벨이 합쳐진 PNG, <strong>프로젝트 저장(.melp)</strong>은 나중에 다시 편집할 수 있는 원본입니다.</li>
               <li>저장한 <strong>.melp</strong>를 열면 라벨·도형을 이어서 편집할 수 있습니다.</li>
               <li>맞춤·＋·－ 또는 <strong>Ctrl+휠</strong>로 확대·축소합니다.</li>
+              <li>상단 <strong>누끼</strong>로 특정 색을 클릭해 투명하게 만들 수 있습니다(오차 조절 가능). 상단 <strong>캔버스</strong>로 그림 여백을 늘립니다.</li>
             </ul>
           </section>
           <section class="help-page" data-title="2. 라벨 만들기">
