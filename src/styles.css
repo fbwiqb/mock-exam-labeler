@@ -108,6 +108,33 @@ select {
   gap: 8px;
 }
 
+.align-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.align-group[hidden] {
+  display: none;
+}
+
+.align-label {
+  margin-right: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.align-group .icon-button {
+  width: 30px;
+  height: 28px;
+  font-size: 15px;
+}
+
+.label-row.anchor {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
 .app {
   height: calc(100vh - 94px);
   display: grid;

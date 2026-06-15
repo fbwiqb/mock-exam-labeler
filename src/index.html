@@ -21,6 +21,15 @@
           <button id="canvasResizeBtn" title="캔버스 여백 늘리기">캔버스</button>
         </div>
       </div>
+      <div class="align-group" id="alignGroup" hidden title="선택한 라벨을 기준 라벨에 맞춤">
+        <span class="align-label">맞춤</span>
+        <button id="alignLeft" class="icon-button" title="왼쪽 맞춤">⇤</button>
+        <button id="alignCenterX" class="icon-button" title="가로 가운데 맞춤">↔</button>
+        <button id="alignRight" class="icon-button" title="오른쪽 맞춤">⇥</button>
+        <button id="alignTop" class="icon-button" title="위 맞춤">⤒</button>
+        <button id="alignCenterY" class="icon-button" title="세로 가운데 맞춤">↕</button>
+        <button id="alignBottom" class="icon-button" title="아래 맞춤">⤓</button>
+      </div>
       <div class="header-actions">
         <button id="helpBtn">사용법</button>
         <button id="saveProjectBtn">프로젝트 저장(.melp)</button>
@@ -346,7 +355,16 @@
               <li>점을 찍거나 드래그할 때 <strong>루페</strong>가 우측 하단에 나타나 픽셀 위치와 색을 확대해 보여줍니다.</li>
             </ul>
           </section>
-          <section class="help-page" data-title="6. 단축키">
+          <section class="help-page" data-title="6. 다중 선택·맞춤">
+            <ul>
+              <li>라벨을 <strong>Ctrl(또는 Shift)+클릭</strong>하면 여러 개를 함께 선택합니다. 빈 곳을 <strong>드래그</strong>하면 사각형 범위 안의 라벨이 한꺼번에 선택됩니다.</li>
+              <li>선택된 라벨은 점선 테두리, <strong>기준 라벨</strong>(마지막에 고른 것)은 굵은 파란 테두리와 모서리 점으로 표시됩니다.</li>
+              <li>2개 이상 선택하면 상단에 <strong>맞춤 버튼</strong>이 나타나, 왼쪽/가로 가운데/오른쪽·위/세로 가운데/아래로 <strong>기준 라벨에 맞춰</strong> 정렬합니다.</li>
+              <li>선택된 라벨은 함께 이동(드래그·방향키)·삭제·복제됩니다.</li>
+              <li>도형은 드래그로 넣을 때 <strong>Shift</strong>를 누르면 정사각형·정원이 됩니다.</li>
+            </ul>
+          </section>
+          <section class="help-page" data-title="7. 단축키">
             <ul>
               <li><code>Ctrl+Z</code> / <code>Ctrl+Y</code> — 실행 취소 / 다시 실행</li>
               <li><code>Delete</code> — 선택한 라벨·도형 삭제 · <code>Ctrl+D</code> — 라벨 복제</li>

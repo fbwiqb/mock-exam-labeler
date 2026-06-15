@@ -14,6 +14,13 @@ const els = {
   knockoutTolValue: document.getElementById("knockoutTolValue"),
   knockoutDoneBtn: document.getElementById("knockoutDoneBtn"),
   canvasResizeBtn: document.getElementById("canvasResizeBtn"),
+  alignGroup: document.getElementById("alignGroup"),
+  alignLeft: document.getElementById("alignLeft"),
+  alignCenterX: document.getElementById("alignCenterX"),
+  alignRight: document.getElementById("alignRight"),
+  alignTop: document.getElementById("alignTop"),
+  alignCenterY: document.getElementById("alignCenterY"),
+  alignBottom: document.getElementById("alignBottom"),
   resizeBar: document.getElementById("resizeBar"),
   resizeBgSelect: document.getElementById("resizeBgSelect"),
   resizeApplyBtn: document.getElementById("resizeApplyBtn"),
@@ -103,6 +110,7 @@ const state = {
   labels: [],
   shapes: [],
   selectedId: null,
+  selectedIds: [],
   selectedShapeId: null,
   nextId: 1,
   nextShapeId: 1,
@@ -160,6 +168,7 @@ function snapshotState() {
     labels: cloneLabels(),
     shapes: cloneShapes(),
     selectedId: state.selectedId,
+    selectedIds: state.selectedIds.slice(),
     selectedShapeId: state.selectedShapeId,
     nextId: state.nextId,
     nextShapeId: state.nextShapeId,
@@ -171,6 +180,7 @@ function applySnapshotData(snapshot) {
   state.labels = cloneLabels(snapshot.labels);
   state.shapes = cloneShapes(snapshot.shapes || []);
   state.selectedId = snapshot.selectedId;
+  state.selectedIds = (snapshot.selectedIds || (snapshot.selectedId ? [snapshot.selectedId] : [])).slice();
   state.selectedShapeId = snapshot.selectedShapeId || null;
   state.nextId = snapshot.nextId;
   state.nextShapeId = snapshot.nextShapeId || 1;
@@ -268,6 +278,98 @@ function beginLabelPlacement(text, preset = "", notify = true) {
 
 function selectedLabel() {
   return state.labels.find((label) => label.id === state.selectedId) || null;
+}
+
+function selectedLabels() {
+  return state.labels.filter((label) => state.selectedIds.includes(label.id));
+}
+
+function clearLabelSelection() {
+  state.selectedIds = [];
+  state.selectedId = null;
+}
+
+function selectLabel(id, additive) {
+  if (!additive) {
+    state.selectedIds = [id];
+    state.selectedId = id;
+    return;
+  }
+  if (state.selectedIds.includes(id)) {
+    state.selectedIds = state.selectedIds.filter((other) => other !== id);
+    if (state.selectedId === id) state.selectedId = state.selectedIds[state.selectedIds.length - 1] || null;
+  } else {
+    state.selectedIds.push(id);
+    state.selectedId = id;
+  }
+}
+
+function alignSelectedLabels(mode) {
+  const labels = selectedLabels();
+  const anchor = selectedLabel();
+  if (labels.length < 2 || !anchor) return;
+  const ab = labelBounds(anchor);
+  pushHistory();
+  for (const label of labels) {
+    if (label.id === anchor.id) continue;
+    const b = labelBounds(label);
+    if (mode === "left") label.x = Math.round(ab.x);
+    else if (mode === "right") label.x = Math.round(ab.x + ab.width - b.width);
+    else if (mode === "centerX") label.x = Math.round(ab.x + ab.width / 2 - b.width / 2);
+    else if (mode === "top") label.y = Math.round(ab.y);
+    else if (mode === "bottom") label.y = Math.round(ab.y + ab.height - b.height);
+    else if (mode === "centerY") label.y = Math.round(ab.y + ab.height / 2 - b.height / 2);
+  }
+  setDirty(true);
+  render();
+}
+
+function updateAlignToolbar() {
+  if (els.alignGroup) els.alignGroup.hidden = state.selectedIds.length < 2;
+}
+
+let renderQueued = false;
+function scheduleRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  window.requestAnimationFrame(() => {
+    renderQueued = false;
+    render();
+  });
+}
+
+function updateMarqueeSelection() {
+  const drag = state.dragging;
+  const rx = Math.min(drag.startX, drag.x);
+  const ry = Math.min(drag.startY, drag.y);
+  const rw = Math.abs(drag.x - drag.startX);
+  const rh = Math.abs(drag.y - drag.startY);
+  const merged = drag.additive ? drag.base.slice() : [];
+  for (const label of state.labels) {
+    const b = labelBounds(label);
+    const intersects = b.x < rx + rw && b.x + b.width > rx && b.y < ry + rh && b.y + b.height > ry;
+    if (intersects && !merged.includes(label.id)) merged.push(label.id);
+  }
+  state.selectedIds = merged;
+  state.selectedId = merged[merged.length - 1] || null;
+}
+
+function drawMarquee(context) {
+  if (!state.dragging || state.dragging.type !== "marquee") return;
+  const drag = state.dragging;
+  const s = 1 / Math.max(state.zoom, 0.001);
+  const rx = Math.min(drag.startX, drag.x);
+  const ry = Math.min(drag.startY, drag.y);
+  const rw = Math.abs(drag.x - drag.startX);
+  const rh = Math.abs(drag.y - drag.startY);
+  context.save();
+  context.fillStyle = "rgba(31,76,143,0.08)";
+  context.strokeStyle = "#1f4c8f";
+  context.lineWidth = 1 * s;
+  context.setLineDash([4 * s, 3 * s]);
+  context.fillRect(rx, ry, rw, rh);
+  context.strokeRect(rx, ry, rw, rh);
+  context.restore();
 }
 
 function quoteFontFamily(font) {
@@ -391,13 +493,42 @@ function layoutLabel(label, context = ctx) {
   return { runs, totalWidth: cursor };
 }
 
+const boundsCache = new WeakMap();
+
+function labelLayoutKey(label) {
+  return [
+    label.text,
+    label.fontSize,
+    label.fontFamily || "",
+    label.bold ? 1 : 0,
+    label.italic ? 1 : 0,
+    Number.isFinite(label.padding) ? label.padding : 8,
+    label.underline ? 1 : 0
+  ].join("");
+}
+
 function labelBounds(label, context = ctx) {
-  const layout = layoutLabel(label, context);
-  const padding = Number.isFinite(label.padding) ? label.padding : 8;
-  const underlineExtra = label.underline ? Math.max(5, Math.round(label.fontSize * 0.18)) : 0;
-  const width = Math.ceil(layout.totalWidth) + padding * 2;
-  const height = Math.ceil(label.fontSize * 1.25) + padding * 2 + underlineExtra;
-  return { x: label.x, y: label.y, width, height, padding, textWidth: layout.totalWidth, underlineExtra, layout };
+  const key = labelLayoutKey(label);
+  let cached = boundsCache.get(label);
+  if (!cached || cached.key !== key) {
+    const layout = layoutLabel(label, context);
+    const padding = Number.isFinite(label.padding) ? label.padding : 8;
+    const underlineExtra = label.underline ? Math.max(5, Math.round(label.fontSize * 0.18)) : 0;
+    const width = Math.ceil(layout.totalWidth) + padding * 2;
+    const height = Math.ceil(label.fontSize * 1.25) + padding * 2 + underlineExtra;
+    cached = { key, width, height, padding, textWidth: layout.totalWidth, underlineExtra, layout };
+    boundsCache.set(label, cached);
+  }
+  return {
+    x: label.x,
+    y: label.y,
+    width: cached.width,
+    height: cached.height,
+    padding: cached.padding,
+    textWidth: cached.textWidth,
+    underlineExtra: cached.underlineExtra,
+    layout: cached.layout
+  };
 }
 
 function defaultLeader() {
@@ -560,16 +691,38 @@ function rgbToHex(r, g, b) {
   return `#${[r, g, b].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
 }
 
+let sampleCanvasEl = null;
+let sampleCtxRef = null;
+let sampleData = null;
+let sampleDataUrl = "";
+
+function getSampleImageData() {
+  if (!state.image) return null;
+  if (sampleData && sampleDataUrl === state.imageDataUrl && sampleCanvasEl.width === state.image.naturalWidth) {
+    return sampleData;
+  }
+  if (!sampleCanvasEl) {
+    sampleCanvasEl = document.createElement("canvas");
+    sampleCtxRef = sampleCanvasEl.getContext("2d", { willReadFrequently: true });
+  }
+  sampleCanvasEl.width = state.image.naturalWidth;
+  sampleCanvasEl.height = state.image.naturalHeight;
+  sampleCtxRef.clearRect(0, 0, sampleCanvasEl.width, sampleCanvasEl.height);
+  sampleCtxRef.drawImage(state.image, 0, 0);
+  sampleData = sampleCtxRef.getImageData(0, 0, sampleCanvasEl.width, sampleCanvasEl.height);
+  sampleDataUrl = state.imageDataUrl;
+  return sampleData;
+}
+
 function sampleImageColor(point) {
-  const sampleCanvas = document.createElement("canvas");
-  sampleCanvas.width = state.image.naturalWidth;
-  sampleCanvas.height = state.image.naturalHeight;
-  const sampleCtx = sampleCanvas.getContext("2d", { willReadFrequently: true });
-  sampleCtx.drawImage(state.image, 0, 0);
-  const x = Math.max(0, Math.min(sampleCanvas.width - 1, Math.round(point.x)));
-  const y = Math.max(0, Math.min(sampleCanvas.height - 1, Math.round(point.y)));
-  const pixel = sampleCtx.getImageData(x, y, 1, 1).data;
-  return rgbToHex(pixel[0], pixel[1], pixel[2]);
+  const data = getSampleImageData();
+  if (!data) return "#000000";
+  const w = state.image.naturalWidth;
+  const h = state.image.naturalHeight;
+  const x = Math.max(0, Math.min(w - 1, Math.round(point.x)));
+  const y = Math.max(0, Math.min(h - 1, Math.round(point.y)));
+  const i = (y * w + x) * 4;
+  return rgbToHex(data.data[i], data.data[i + 1], data.data[i + 2]);
 }
 
 function hexToRgb(hex) {
@@ -685,7 +838,7 @@ function setCanvasResizeMode(active) {
   setShapeTool("");
   exitKnockout();
   state.mode = "canvasResize";
-  state.selectedId = null;
+  clearLabelSelection();
   state.selectedShapeId = null;
   state.resizePad = Math.max(120, Math.round(Math.max(state.image.naturalWidth, state.image.naturalHeight) * 0.5));
   state.resizeFrame = { top: 0, right: 0, bottom: 0, left: 0 };
@@ -912,7 +1065,7 @@ function drawLeader(context, label, selected = false) {
   context.restore();
 }
 
-function drawLabel(context, label, selected = false) {
+function drawLabel(context, label, selected = false, isAnchor = false) {
   const bounds = labelBounds(label, context);
   context.save();
   context.textBaseline = "top";
@@ -957,12 +1110,32 @@ function drawLabel(context, label, selected = false) {
     context.stroke();
   }
 
-  if (selected) {
+  if (selected || isAnchor) {
+    const s = 1 / Math.max(state.zoom, 0.001);
+    const pad = 4;
     context.strokeStyle = "#1f4c8f";
-    context.lineWidth = 1;
-    context.setLineDash([4, 3]);
-    context.strokeRect(bounds.x - 4, bounds.y - 4, bounds.width + 8, bounds.height + 8);
-    context.setLineDash([]);
+    if (isAnchor) {
+      context.setLineDash([]);
+      context.lineWidth = 2.5 * s;
+      context.strokeRect(bounds.x - pad, bounds.y - pad, bounds.width + pad * 2, bounds.height + pad * 2);
+      const corners = [
+        [bounds.x - pad, bounds.y - pad],
+        [bounds.x + bounds.width + pad, bounds.y - pad],
+        [bounds.x - pad, bounds.y + bounds.height + pad],
+        [bounds.x + bounds.width + pad, bounds.y + bounds.height + pad]
+      ];
+      context.fillStyle = "#1f4c8f";
+      for (const [cx, cy] of corners) {
+        context.beginPath();
+        context.arc(cx, cy, 4 * s, 0, Math.PI * 2);
+        context.fill();
+      }
+    } else {
+      context.lineWidth = 1.2 * s;
+      context.setLineDash([4 * s, 3 * s]);
+      context.strokeRect(bounds.x - pad, bounds.y - pad, bounds.width + pad * 2, bounds.height + pad * 2);
+      context.setLineDash([]);
+    }
   }
 
   context.restore();
@@ -991,7 +1164,9 @@ function drawTo(targetCanvas, options = {}) {
       drawLeader(targetCtx, label, includeSelection && label.id === state.selectedId);
     }
     for (const label of state.labels) {
-      drawLabel(targetCtx, label, includeSelection && label.id === state.selectedId);
+      const isAnchor = includeSelection && label.id === state.selectedId;
+      const isSelected = includeSelection && !isAnchor && state.selectedIds.includes(label.id);
+      drawLabel(targetCtx, label, isSelected, isAnchor);
     }
   }
 }
@@ -1004,6 +1179,7 @@ function render() {
     updateInspector();
     updateShapePanel();
     updateHistoryButtons();
+    updateAlignToolbar();
     return;
   }
 
@@ -1024,6 +1200,8 @@ function render() {
   dropEmpty.style.display = "none";
   drawTo(canvas, { includeSelection: true });
   drawPolygonDraft(ctx);
+  drawMarquee(ctx);
+  updateAlignToolbar();
   updateLabelList();
   updateInspector();
   updateShapePanel();
@@ -1128,7 +1306,7 @@ function setShapeTool(tool) {
   els.ellipseShapeBtn.classList.toggle("active", tool === "ellipse");
   els.polygonShapeBtn.classList.toggle("active", tool === "polygon");
   if (tool === "polygon") showToast("점을 차례로 클릭하세요. 처음 점을 다시 누르면 완성됩니다.");
-  else if (tool) showToast("도형을 넣을 영역을 드래그하세요.");
+  else if (tool) showToast("도형을 넣을 영역을 드래그하세요. (Shift: 정사각형·정원)");
 }
 
 function setPickerMode(target) {
@@ -1188,6 +1366,7 @@ function addLabelAt(x, y, text) {
   if (!state.image) return;
   const label = makeLabel(Math.round(x), Math.round(y), text);
   state.labels.push(label);
+  state.selectedIds = [label.id];
   state.selectedId = label.id;
   setAddMode(false);
   render();
@@ -1268,11 +1447,13 @@ function updateLabelList() {
   els.labelList.innerHTML = "";
   for (const label of state.labels) {
     const row = document.createElement("button");
-    row.className = `label-row${label.id === state.selectedId ? " selected" : ""}`;
+    const isSelected = state.selectedIds.includes(label.id);
+    const isAnchor = label.id === state.selectedId;
+    row.className = `label-row${isSelected ? " selected" : ""}${isAnchor ? " anchor" : ""}`;
     const leader = normalizedLeader(label);
     row.innerHTML = `<span class="label-main"><span class="leader-badge${leader.enabled ? " on" : ""}">${leader.enabled ? "지시선" : "라벨"}</span><span class="label-text">${escapeHtml(label.text)}</span></span><span class="label-pos">${Math.round(label.x)}, ${Math.round(label.y)}</span>`;
-    row.addEventListener("click", () => {
-      state.selectedId = label.id;
+    row.addEventListener("click", (event) => {
+      selectLabel(label.id, event.ctrlKey || event.shiftKey || event.metaKey);
       state.selectedShapeId = null;
       render();
     });
@@ -1385,6 +1566,7 @@ async function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "
     state.labels = [];
     state.shapes = [];
     state.selectedId = null;
+    state.selectedIds = [];
     state.selectedShapeId = null;
     state.polygonDraft = null;
     state.nextId = 1;
@@ -1411,6 +1593,7 @@ async function loadProject(project, filePath = "") {
     state.labels = Array.isArray(project.labels) ? project.labels : [];
     state.shapes = Array.isArray(project.shapes) ? project.shapes : [];
     state.selectedId = null;
+    state.selectedIds = [];
     state.selectedShapeId = null;
     state.polygonDraft = null;
     state.nextId = Math.max(1, ...state.labels.map((label) => Number(label.id) || 0)) + 1;
@@ -1494,10 +1677,11 @@ function deleteSelected() {
     deleteSelectedShape();
     return;
   }
-  if (!state.selectedId) return;
+  if (!state.selectedIds.length) return;
   pushHistory();
-  state.labels = state.labels.filter((label) => label.id !== state.selectedId);
-  state.selectedId = null;
+  const ids = new Set(state.selectedIds);
+  state.labels = state.labels.filter((label) => !ids.has(label.id));
+  clearLabelSelection();
   setDirty(true);
   render();
 }
@@ -1512,23 +1696,26 @@ function deleteSelectedShape() {
 }
 
 function duplicateSelected() {
-  const label = selectedLabel();
-  if (!label) return;
+  const labels = selectedLabels();
+  if (!labels.length) return;
   pushHistory();
-  const copy = JSON.parse(JSON.stringify({ ...label, id: state.nextId++, x: label.x + 16, y: label.y + 16 }));
-  state.labels.push(copy);
-  state.selectedId = copy.id;
+  const copies = labels.map((label) => JSON.parse(JSON.stringify({ ...label, id: state.nextId++, x: label.x + 16, y: label.y + 16 })));
+  state.labels.push(...copies);
+  state.selectedIds = copies.map((copy) => copy.id);
+  state.selectedId = copies[copies.length - 1].id;
   state.selectedShapeId = null;
   setDirty(true);
   render();
 }
 
 function moveSelected(dx, dy) {
-  const label = selectedLabel();
-  if (!label) return;
+  const labels = selectedLabels();
+  if (!labels.length) return;
   pushHistory();
-  label.x = Math.round(label.x + dx);
-  label.y = Math.round(label.y + dy);
+  for (const label of labels) {
+    label.x = Math.round(label.x + dx);
+    label.y = Math.round(label.y + dy);
+  }
   setDirty(true);
   render();
 }
@@ -1644,6 +1831,13 @@ els.saveProjectBtn.addEventListener("click", async () => {
 });
 
 els.saveImageBtn.addEventListener("click", saveImage);
+
+els.alignLeft.addEventListener("click", () => alignSelectedLabels("left"));
+els.alignCenterX.addEventListener("click", () => alignSelectedLabels("centerX"));
+els.alignRight.addEventListener("click", () => alignSelectedLabels("right"));
+els.alignTop.addEventListener("click", () => alignSelectedLabels("top"));
+els.alignCenterY.addEventListener("click", () => alignSelectedLabels("centerY"));
+els.alignBottom.addEventListener("click", () => alignSelectedLabels("bottom"));
 
 els.knockoutBtn.addEventListener("click", () => {
   setKnockoutMode(state.mode !== "knockout");
@@ -2011,7 +2205,7 @@ canvas.addEventListener("pointerdown", (event) => {
     };
     state.shapes.push(shape);
     state.selectedShapeId = shape.id;
-    state.selectedId = null;
+    clearLabelSelection();
     state.dragging = { type: "new-shape", id: shape.id, startX: point.x, startY: point.y, changed: true };
     canvas.setPointerCapture(event.pointerId);
     render();
@@ -2022,6 +2216,7 @@ canvas.addEventListener("pointerdown", (event) => {
     pushHistory();
     const label = makeLeaderLabel(point.x, point.y, point.x + 48, point.y - 22);
     state.labels.push(label);
+    state.selectedIds = [label.id];
     state.selectedId = label.id;
     state.selectedShapeId = null;
     const bounds = labelBounds(label);
@@ -2032,9 +2227,12 @@ canvas.addEventListener("pointerdown", (event) => {
     return;
   }
 
+  const additive = event.ctrlKey || event.shiftKey || event.metaKey;
+
   const leaderHit = hitLeader(point);
   if (leaderHit) {
-    state.selectedId = leaderHit.id;
+    if (!state.selectedIds.includes(leaderHit.id)) selectLabel(leaderHit.id, false);
+    else state.selectedId = leaderHit.id;
     state.selectedShapeId = null;
     pushHistory();
     state.dragging = { type: "leader", id: leaderHit.id, changed: false };
@@ -2046,25 +2244,38 @@ canvas.addEventListener("pointerdown", (event) => {
 
   const hit = hitLabel(point);
   if (hit) {
-    const bounds = labelBounds(hit);
-    state.selectedId = hit.id;
     state.selectedShapeId = null;
-    pushHistory();
-    state.dragging = { type: "label", id: hit.id, offsetX: point.x - bounds.x, offsetY: point.y - bounds.y, changed: false };
-    canvas.setPointerCapture(event.pointerId);
-  } else {
-    state.selectedId = null;
-    const shapeHit = hitShape(point);
-    if (shapeHit) {
-      const rect = normalizedShapeRect(shapeHit);
-      state.selectedShapeId = shapeHit.id;
-      pushHistory();
-      state.dragging = { type: "shape", id: shapeHit.id, offsetX: point.x - rect.x, offsetY: point.y - rect.y, changed: false };
-      canvas.setPointerCapture(event.pointerId);
-    } else {
-      state.selectedShapeId = null;
+    if (additive) {
+      selectLabel(hit.id, true);
+      render();
+      return;
     }
+    if (!state.selectedIds.includes(hit.id)) selectLabel(hit.id, false);
+    else state.selectedId = hit.id;
+    pushHistory();
+    const moving = selectedLabels().map((label) => ({ id: label.id, offsetX: point.x - label.x, offsetY: point.y - label.y }));
+    state.dragging = { type: "label-group", labels: moving, changed: false };
+    canvas.setPointerCapture(event.pointerId);
+    render();
+    return;
   }
+
+  const shapeHit = hitShape(point);
+  if (shapeHit) {
+    clearLabelSelection();
+    const rect = normalizedShapeRect(shapeHit);
+    state.selectedShapeId = shapeHit.id;
+    pushHistory();
+    state.dragging = { type: "shape", id: shapeHit.id, offsetX: point.x - rect.x, offsetY: point.y - rect.y, changed: false };
+    canvas.setPointerCapture(event.pointerId);
+    render();
+    return;
+  }
+
+  state.selectedShapeId = null;
+  if (!additive) clearLabelSelection();
+  state.dragging = { type: "marquee", startX: point.x, startY: point.y, x: point.x, y: point.y, additive, base: state.selectedIds.slice() };
+  canvas.setPointerCapture(event.pointerId);
   render();
 });
 
@@ -2085,14 +2296,42 @@ canvas.addEventListener("pointermove", (event) => {
     return;
   }
 
+  if (state.dragging.type === "marquee") {
+    state.dragging.x = point.x;
+    state.dragging.y = point.y;
+    updateMarqueeSelection();
+    scheduleRender();
+    return;
+  }
+
+  if (state.dragging.type === "label-group") {
+    for (const moving of state.dragging.labels) {
+      const target = state.labels.find((label) => label.id === moving.id);
+      if (target) {
+        target.x = Math.round(point.x - moving.offsetX);
+        target.y = Math.round(point.y - moving.offsetY);
+      }
+    }
+    state.dragging.changed = true;
+    scheduleRender();
+    return;
+  }
+
   if (state.dragging.type === "new-shape" || state.dragging.type === "shape") {
     const shape = state.shapes.find((item) => item.id === state.dragging.id);
     if (!shape) return;
     if (state.dragging.type === "new-shape") {
+      let nextW = Math.round(point.x - state.dragging.startX);
+      let nextH = Math.round(point.y - state.dragging.startY);
+      if (event.shiftKey) {
+        const size = Math.max(Math.abs(nextW), Math.abs(nextH));
+        nextW = size * (nextW < 0 ? -1 : 1);
+        nextH = size * (nextH < 0 ? -1 : 1);
+      }
       shape.x = Math.round(state.dragging.startX);
       shape.y = Math.round(state.dragging.startY);
-      shape.width = Math.round(point.x - state.dragging.startX);
-      shape.height = Math.round(point.y - state.dragging.startY);
+      shape.width = nextW;
+      shape.height = nextH;
     } else {
       const rect = normalizedShapeRect(shape);
       const nextX = Math.round(point.x - state.dragging.offsetX);
@@ -2136,11 +2375,13 @@ canvas.addEventListener("pointermove", (event) => {
 });
 
 canvas.addEventListener("pointerup", (event) => {
+  const wasMarquee = state.dragging?.type === "marquee";
   if (state.dragging?.type === "new-label") setAddMode(false);
   if (state.dragging?.type === "new-shape") setShapeTool("");
   if (state.dragging?.changed) setDirty(true);
   state.dragging = null;
   hideMagnifier();
+  if (wasMarquee) render();
   try {
     canvas.releasePointerCapture(event.pointerId);
   } catch (_error) {
@@ -2148,8 +2389,10 @@ canvas.addEventListener("pointerup", (event) => {
 });
 
 canvas.addEventListener("pointercancel", () => {
+  const wasMarquee = state.dragging?.type === "marquee";
   state.dragging = null;
   hideMagnifier();
+  if (wasMarquee) render();
 });
 
 canvas.addEventListener("pointerleave", () => {
