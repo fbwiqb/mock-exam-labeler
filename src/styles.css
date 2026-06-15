@@ -108,14 +108,44 @@ select {
   gap: 8px;
 }
 
+.app-header {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.app-header button {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .align-group {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .align-group[hidden] {
   display: none;
+}
+
+.align-divider {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 2px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+
+.align-divider[hidden] {
+  display: none;
+}
+
+.align-text-btn {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 .align-label {

@@ -21,6 +21,9 @@ const els = {
   alignTop: document.getElementById("alignTop"),
   alignCenterY: document.getElementById("alignCenterY"),
   alignBottom: document.getElementById("alignBottom"),
+  distributeWrap: document.getElementById("distributeWrap"),
+  distributeX: document.getElementById("distributeX"),
+  distributeY: document.getElementById("distributeY"),
   resizeBar: document.getElementById("resizeBar"),
   resizeBgSelect: document.getElementById("resizeBgSelect"),
   resizeApplyBtn: document.getElementById("resizeApplyBtn"),
@@ -304,6 +307,16 @@ function selectLabel(id, additive) {
   }
 }
 
+function moveLabelBy(label, dx, dy) {
+  if (!dx && !dy) return;
+  label.x = Math.round(label.x + dx);
+  label.y = Math.round(label.y + dy);
+  if (label.leader) {
+    label.leader.x = Math.round((label.leader.x || 0) + dx);
+    label.leader.y = Math.round((label.leader.y || 0) + dy);
+  }
+}
+
 function alignSelectedLabels(mode) {
   const labels = selectedLabels();
   const anchor = selectedLabel();
@@ -313,12 +326,50 @@ function alignSelectedLabels(mode) {
   for (const label of labels) {
     if (label.id === anchor.id) continue;
     const b = labelBounds(label);
-    if (mode === "left") label.x = Math.round(ab.x);
-    else if (mode === "right") label.x = Math.round(ab.x + ab.width - b.width);
-    else if (mode === "centerX") label.x = Math.round(ab.x + ab.width / 2 - b.width / 2);
-    else if (mode === "top") label.y = Math.round(ab.y);
-    else if (mode === "bottom") label.y = Math.round(ab.y + ab.height - b.height);
-    else if (mode === "centerY") label.y = Math.round(ab.y + ab.height / 2 - b.height / 2);
+    let targetX = label.x;
+    let targetY = label.y;
+    if (mode === "left") targetX = ab.x;
+    else if (mode === "right") targetX = ab.x + ab.width - b.width;
+    else if (mode === "centerX") targetX = ab.x + ab.width / 2 - b.width / 2;
+    else if (mode === "top") targetY = ab.y;
+    else if (mode === "bottom") targetY = ab.y + ab.height - b.height;
+    else if (mode === "centerY") targetY = ab.y + ab.height / 2 - b.height / 2;
+    moveLabelBy(label, Math.round(targetX) - label.x, Math.round(targetY) - label.y);
+  }
+  setDirty(true);
+  render();
+}
+
+function distributeSelectedLabels(axis) {
+  const labels = selectedLabels();
+  if (labels.length < 3) {
+    showToast("간격을 동일하게 하려면 3개 이상 선택하세요.");
+    return;
+  }
+  const items = labels.map((label) => ({ label, bounds: labelBounds(label) }));
+  pushHistory();
+  if (axis === "x") {
+    items.sort((a, b) => a.bounds.x - b.bounds.x);
+    const left = items[0].bounds.x;
+    const right = items[items.length - 1].bounds.x + items[items.length - 1].bounds.width;
+    const totalWidth = items.reduce((sum, item) => sum + item.bounds.width, 0);
+    const gap = (right - left - totalWidth) / (items.length - 1);
+    let cursor = left;
+    for (const item of items) {
+      moveLabelBy(item.label, Math.round(cursor) - item.bounds.x, 0);
+      cursor += item.bounds.width + gap;
+    }
+  } else {
+    items.sort((a, b) => a.bounds.y - b.bounds.y);
+    const top = items[0].bounds.y;
+    const bottom = items[items.length - 1].bounds.y + items[items.length - 1].bounds.height;
+    const totalHeight = items.reduce((sum, item) => sum + item.bounds.height, 0);
+    const gap = (bottom - top - totalHeight) / (items.length - 1);
+    let cursor = top;
+    for (const item of items) {
+      moveLabelBy(item.label, 0, Math.round(cursor) - item.bounds.y);
+      cursor += item.bounds.height + gap;
+    }
   }
   setDirty(true);
   render();
@@ -326,6 +377,7 @@ function alignSelectedLabels(mode) {
 
 function updateAlignToolbar() {
   if (els.alignGroup) els.alignGroup.hidden = state.selectedIds.length < 2;
+  if (els.distributeWrap) els.distributeWrap.hidden = state.selectedIds.length < 3;
 }
 
 let renderQueued = false;
@@ -1838,6 +1890,8 @@ els.alignRight.addEventListener("click", () => alignSelectedLabels("right"));
 els.alignTop.addEventListener("click", () => alignSelectedLabels("top"));
 els.alignCenterY.addEventListener("click", () => alignSelectedLabels("centerY"));
 els.alignBottom.addEventListener("click", () => alignSelectedLabels("bottom"));
+els.distributeX.addEventListener("click", () => distributeSelectedLabels("x"));
+els.distributeY.addEventListener("click", () => distributeSelectedLabels("y"));
 
 els.knockoutBtn.addEventListener("click", () => {
   setKnockoutMode(state.mode !== "knockout");
