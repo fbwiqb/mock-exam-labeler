@@ -740,7 +740,7 @@ function commitPolygon() {
   };
   state.shapes.push(shape);
   state.selectedShapeId = shape.id;
-  state.selectedId = null;
+  clearLabelSelection();
   state.polygonDraft = null;
   setShapeTool("");
   setDirty(true);
@@ -801,7 +801,7 @@ function setImageFromDataUrl(dataUrl, done) {
 }
 
 function removeColorFromImage(targetHex, tolerance) {
-  if (!state.image) return;
+  if (!state.image) return false;
   const w = state.image.naturalWidth;
   const h = state.image.naturalHeight;
   const work = document.createElement("canvas");
@@ -824,7 +824,7 @@ function removeColorFromImage(targetHex, tolerance) {
   }
   if (removed === 0) {
     showToast("그 색에 해당하는 픽셀이 없습니다.");
-    return;
+    return false;
   }
   wctx.putImageData(imageData, 0, 0);
   pushHistory();
@@ -833,10 +833,12 @@ function removeColorFromImage(targetHex, tolerance) {
     render();
     showToast(`${removed.toLocaleString()}개 픽셀을 투명하게 만들었습니다.`);
   });
+  return true;
 }
 
 function applyKnockout(point) {
-  removeColorFromImage(sampleImageColor(point), Number(els.knockoutTolerance.value));
+  const removed = removeColorFromImage(sampleImageColor(point), Number(els.knockoutTolerance.value));
+  if (removed) setKnockoutMode(false);
 }
 
 function resizeCanvas(top, right, bottom, left, bg) {
