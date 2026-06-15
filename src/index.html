@@ -21,26 +21,47 @@
           <button id="canvasResizeBtn" title="캔버스 여백 늘리기">캔버스</button>
         </div>
       </div>
-      <div class="align-group" id="alignGroup" hidden title="선택한 라벨을 기준 라벨에 맞춤">
-        <span class="align-label">맞춤</span>
-        <button id="alignLeft" class="icon-button" title="왼쪽 맞춤">⇤</button>
-        <button id="alignCenterX" class="icon-button" title="가로 가운데 맞춤">↔</button>
-        <button id="alignRight" class="icon-button" title="오른쪽 맞춤">⇥</button>
-        <button id="alignTop" class="icon-button" title="위 맞춤">⤒</button>
-        <button id="alignCenterY" class="icon-button" title="세로 가운데 맞춤">↕</button>
-        <button id="alignBottom" class="icon-button" title="아래 맞춤">⤓</button>
-        <span class="align-divider" id="distributeWrap" hidden>
-          <span class="align-label">간격</span>
-          <button id="distributeX" class="align-text-btn" title="가로 간격 동일 (3개 이상)">가로</button>
-          <button id="distributeY" class="align-text-btn" title="세로 간격 동일 (3개 이상)">세로</button>
-        </span>
-      </div>
       <div class="header-actions">
         <button id="helpBtn">사용법</button>
         <button id="saveProjectBtn">프로젝트 저장(.melp)</button>
         <button id="saveImageBtn" class="primary">이미지 저장</button>
       </div>
     </header>
+
+    <div class="context-bar" id="contextBar" hidden>
+      <div class="ctx-section" id="alignGroup" hidden>
+        <span class="ctx-label">맞춤</span>
+        <button id="alignLeft" class="icon-button" title="왼쪽 맞춤">⇤</button>
+        <button id="alignCenterX" class="icon-button" title="가로 가운데 맞춤">↔</button>
+        <button id="alignRight" class="icon-button" title="오른쪽 맞춤">⇥</button>
+        <button id="alignTop" class="icon-button" title="위 맞춤">⤒</button>
+        <button id="alignCenterY" class="icon-button" title="세로 가운데 맞춤">↕</button>
+        <button id="alignBottom" class="icon-button" title="아래 맞춤">⤓</button>
+        <span class="ctx-divider" id="distributeWrap" hidden>
+          <span class="ctx-label">간격</span>
+          <button id="distributeX" class="ctx-text-btn" title="가로 간격 동일 (3개 이상)">가로</button>
+          <button id="distributeY" class="ctx-text-btn" title="세로 간격 동일 (3개 이상)">세로</button>
+        </span>
+      </div>
+      <div class="ctx-section" id="knockoutBar" hidden>
+        <span class="ctx-label">누끼</span>
+        <span class="ctx-hint">지울 색을 클릭하세요</span>
+        <label class="ctx-range">오차 <span id="knockoutTolValue">30</span><input id="knockoutTolerance" type="range" min="0" max="120" value="30"></label>
+        <button id="knockoutDoneBtn">완료</button>
+      </div>
+      <div class="ctx-section" id="resizeBar" hidden>
+        <span class="ctx-label">캔버스</span>
+        <span class="ctx-hint">가장자리 파란 점을 드래그하세요</span>
+        <label class="ctx-range">여백 배경
+          <select id="resizeBgSelect">
+            <option value="transparent">투명</option>
+            <option value="white">흰색</option>
+          </select>
+        </label>
+        <button id="resizeApplyBtn" class="primary">적용</button>
+        <button id="resizeCancelBtn">취소</button>
+      </div>
+    </div>
 
     <main class="app">
       <aside class="panel tools">
@@ -237,22 +258,6 @@
       <div id="magnifierMeta" class="magnifier-meta">0, 0</div>
     </div>
     <div id="toast" class="toast" hidden></div>
-    <div id="knockoutBar" class="knockout-bar" hidden>
-      <span class="knockout-hint">배경 투명 — 지울 색을 클릭하세요</span>
-      <label class="knockout-tol">오차 <span id="knockoutTolValue">30</span><input id="knockoutTolerance" type="range" min="0" max="120" value="30"></label>
-      <button id="knockoutDoneBtn">완료</button>
-    </div>
-    <div id="resizeBar" class="knockout-bar" hidden>
-      <span class="knockout-hint">캔버스 크기 — 가장자리 파란 점을 드래그하세요</span>
-      <label class="knockout-tol">여백 배경
-        <select id="resizeBgSelect">
-          <option value="transparent">투명</option>
-          <option value="white">흰색</option>
-        </select>
-      </label>
-      <button id="resizeApplyBtn">적용</button>
-      <button id="resizeCancelBtn">취소</button>
-    </div>
     <dialog id="formulaDialog">
       <div class="formula">
         <header>

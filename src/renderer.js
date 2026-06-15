@@ -14,6 +14,7 @@ const els = {
   knockoutTolValue: document.getElementById("knockoutTolValue"),
   knockoutDoneBtn: document.getElementById("knockoutDoneBtn"),
   canvasResizeBtn: document.getElementById("canvasResizeBtn"),
+  contextBar: document.getElementById("contextBar"),
   alignGroup: document.getElementById("alignGroup"),
   alignLeft: document.getElementById("alignLeft"),
   alignCenterX: document.getElementById("alignCenterX"),
@@ -375,9 +376,16 @@ function distributeSelectedLabels(axis) {
   render();
 }
 
+function updateContextBar() {
+  if (!els.contextBar) return;
+  els.contextBar.hidden = els.alignGroup.hidden && els.knockoutBar.hidden && els.resizeBar.hidden;
+}
+
 function updateAlignToolbar() {
-  if (els.alignGroup) els.alignGroup.hidden = state.selectedIds.length < 2;
-  if (els.distributeWrap) els.distributeWrap.hidden = state.selectedIds.length < 3;
+  const showAlign = state.mode === "select" && state.selectedIds.length >= 2;
+  if (els.alignGroup) els.alignGroup.hidden = !showAlign;
+  if (els.distributeWrap) els.distributeWrap.hidden = !(showAlign && state.selectedIds.length >= 3);
+  updateContextBar();
 }
 
 let renderQueued = false;
@@ -1241,6 +1249,7 @@ function render() {
     updateInspector();
     updateShapePanel();
     updateHistoryButtons();
+    updateAlignToolbar();
     return;
   }
 
@@ -1380,6 +1389,7 @@ function exitKnockout() {
   els.knockoutBar.hidden = true;
   els.knockoutBtn.classList.remove("active");
   canvasShell.classList.remove("knockout-mode");
+  updateContextBar();
 }
 
 function exitResize() {
@@ -1387,6 +1397,7 @@ function exitResize() {
   if (state.mode === "canvasResize") state.mode = "select";
   els.resizeBar.hidden = true;
   els.canvasResizeBtn.classList.remove("active");
+  updateContextBar();
 }
 
 function setKnockoutMode(active) {
@@ -1411,6 +1422,7 @@ function setKnockoutMode(active) {
   canvasShell.classList.add("knockout-mode");
   els.knockoutBar.hidden = false;
   els.knockoutBtn.classList.add("active");
+  updateContextBar();
   showToast("투명하게 만들 색을 클릭하세요.");
 }
 
