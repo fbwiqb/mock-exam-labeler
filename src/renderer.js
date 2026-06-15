@@ -14,13 +14,10 @@ const els = {
   knockoutTolValue: document.getElementById("knockoutTolValue"),
   knockoutDoneBtn: document.getElementById("knockoutDoneBtn"),
   canvasResizeBtn: document.getElementById("canvasResizeBtn"),
-  resizeDialog: document.getElementById("resizeDialog"),
-  resizeCloseBtn: document.getElementById("resizeCloseBtn"),
-  resizeTop: document.getElementById("resizeTop"),
-  resizeBottom: document.getElementById("resizeBottom"),
-  resizeLeft: document.getElementById("resizeLeft"),
-  resizeRight: document.getElementById("resizeRight"),
+  resizeBar: document.getElementById("resizeBar"),
+  resizeBgSelect: document.getElementById("resizeBgSelect"),
   resizeApplyBtn: document.getElementById("resizeApplyBtn"),
+  resizeCancelBtn: document.getElementById("resizeCancelBtn"),
   saveProjectBtn: document.getElementById("saveProjectBtn"),
   saveImageBtn: document.getElementById("saveImageBtn"),
   labelText: document.getElementById("labelText"),
@@ -114,6 +111,9 @@ const state = {
   shapeTool: "",
   pickerTarget: "",
   polygonDraft: null,
+  resizeFrame: null,
+  resizePad: 0,
+  resizeBg: "transparent",
   dragging: null,
   dirty: false,
   pendingText: "(가)",
@@ -671,6 +671,141 @@ function resizeCanvas(top, right, bottom, left, bg) {
   });
 }
 
+function setCanvasResizeMode(active) {
+  if (active && !requireImage()) return;
+  if (!active) {
+    state.mode = "select";
+    state.resizeFrame = null;
+    els.resizeBar.hidden = true;
+    els.canvasResizeBtn.classList.remove("active");
+    render();
+    return;
+  }
+  setAddMode(false);
+  setShapeTool("");
+  exitKnockout();
+  state.mode = "canvasResize";
+  state.selectedId = null;
+  state.selectedShapeId = null;
+  state.resizePad = Math.max(120, Math.round(Math.max(state.image.naturalWidth, state.image.naturalHeight) * 0.5));
+  state.resizeFrame = { top: 0, right: 0, bottom: 0, left: 0 };
+  state.resizeBg = els.resizeBgSelect.value || "transparent";
+  els.resizeBar.hidden = false;
+  els.canvasResizeBtn.classList.add("active");
+  showToast("가장자리의 파란 점을 드래그해 캔버스를 늘리세요.");
+  const availW = Math.max(240, canvasShell.clientWidth - 72);
+  const availH = Math.max(180, canvasShell.clientHeight - 72);
+  const fullW = state.image.naturalWidth + state.resizePad * 2;
+  const fullH = state.image.naturalHeight + state.resizePad * 2;
+  state.zoom = Math.max(0.05, Math.min(1, availW / fullW, availH / fullH));
+  render();
+}
+
+function resizeHandlePositions() {
+  const pad = state.resizePad;
+  const f = state.resizeFrame;
+  const x0 = pad - f.left;
+  const y0 = pad - f.top;
+  const x1 = pad + state.image.naturalWidth + f.right;
+  const y1 = pad + state.image.naturalHeight + f.bottom;
+  const mx = (x0 + x1) / 2;
+  const my = (y0 + y1) / 2;
+  return [
+    { key: "n", x: mx, y: y0 },
+    { key: "s", x: mx, y: y1 },
+    { key: "w", x: x0, y: my },
+    { key: "e", x: x1, y: my },
+    { key: "nw", x: x0, y: y0 },
+    { key: "ne", x: x1, y: y0 },
+    { key: "sw", x: x0, y: y1 },
+    { key: "se", x: x1, y: y1 }
+  ];
+}
+
+function hitResizeHandle(point) {
+  const dist = 14 / Math.max(state.zoom, 0.001);
+  for (const handle of resizeHandlePositions()) {
+    if (Math.abs(point.x - handle.x) <= dist && Math.abs(point.y - handle.y) <= dist) return handle.key;
+  }
+  return null;
+}
+
+function updateResizeFrameFromPoint(key, point) {
+  const pad = state.resizePad;
+  const f = state.resizeFrame;
+  const imgW = state.image.naturalWidth;
+  const imgH = state.image.naturalHeight;
+  if (key.includes("n")) f.top = Math.max(0, Math.min(pad, Math.round(pad - point.y)));
+  if (key.includes("s")) f.bottom = Math.max(0, Math.min(pad, Math.round(point.y - (pad + imgH))));
+  if (key.includes("w")) f.left = Math.max(0, Math.min(pad, Math.round(pad - point.x)));
+  if (key.includes("e")) f.right = Math.max(0, Math.min(pad, Math.round(point.x - (pad + imgW))));
+}
+
+function renderResizePreview() {
+  const pad = state.resizePad;
+  const imgW = state.image.naturalWidth;
+  const imgH = state.image.naturalHeight;
+  const W = imgW + pad * 2;
+  const H = imgH + pad * 2;
+  canvas.width = W;
+  canvas.height = H;
+  canvas.style.width = `${Math.round(W * state.zoom)}px`;
+  canvas.style.height = `${Math.round(H * state.zoom)}px`;
+  canvas.style.display = "block";
+  dropEmpty.style.display = "none";
+
+  const f = state.resizeFrame;
+  const fx = pad - f.left;
+  const fy = pad - f.top;
+  const fw = imgW + f.left + f.right;
+  const fh = imgH + f.top + f.bottom;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = "#d6dae2";
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = state.resizeBg === "white" ? "#ffffff" : "#f3f5f9";
+  ctx.fillRect(fx, fy, fw, fh);
+
+  ctx.save();
+  ctx.translate(pad, pad);
+  ctx.drawImage(state.image, 0, 0);
+  for (const shape of state.shapes) drawShape(ctx, shape, false);
+  for (const label of state.labels) drawLeader(ctx, label, false);
+  for (const label of state.labels) drawLabel(ctx, label, false);
+  ctx.restore();
+
+  const s = 1 / Math.max(state.zoom, 0.001);
+  ctx.strokeStyle = "#1f4c8f";
+  ctx.lineWidth = 1.5 * s;
+  ctx.setLineDash([6 * s, 4 * s]);
+  ctx.strokeRect(fx, fy, fw, fh);
+  ctx.setLineDash([]);
+  const hs = 6 * s;
+  for (const handle of resizeHandlePositions()) {
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#1f4c8f";
+    ctx.lineWidth = 1.5 * s;
+    ctx.fillRect(handle.x - hs, handle.y - hs, hs * 2, hs * 2);
+    ctx.strokeRect(handle.x - hs, handle.y - hs, hs * 2, hs * 2);
+  }
+  setStatus(`캔버스 ${Math.round(fw)}×${Math.round(fh)}px · 여백 좌${f.left} 우${f.right} 상${f.top} 하${f.bottom}`);
+}
+
+function applyCanvasResize() {
+  const f = state.resizeFrame;
+  if (!f) return;
+  const { top, right, bottom, left } = f;
+  state.mode = "select";
+  state.resizeFrame = null;
+  els.resizeBar.hidden = true;
+  els.canvasResizeBtn.classList.remove("active");
+  if (top + right + bottom + left === 0) {
+    render();
+    return;
+  }
+  resizeCanvas(top, right, bottom, left, state.resizeBg);
+}
+
 function labelAnchorPoint(label, leader, context = ctx) {
   const bounds = labelBounds(label, context);
   const cx = bounds.x + bounds.width / 2;
@@ -872,6 +1007,15 @@ function render() {
     return;
   }
 
+  if (state.mode === "canvasResize" && state.resizeFrame) {
+    renderResizePreview();
+    updateLabelList();
+    updateInspector();
+    updateShapePanel();
+    updateHistoryButtons();
+    return;
+  }
+
   canvas.width = state.image.naturalWidth;
   canvas.height = state.image.naturalHeight;
   canvas.style.width = `${Math.round(canvas.width * state.zoom)}px`;
@@ -956,6 +1100,7 @@ function setAddMode(active) {
     state.pickerTarget = "";
     state.polygonDraft = null;
     exitKnockout();
+    exitResize();
   }
   canvasShell.classList.toggle("add-mode", active);
   canvasShell.classList.remove("shape-mode", "picker-mode");
@@ -974,6 +1119,7 @@ function setShapeTool(tool) {
   state.polygonDraft = null;
   hideMagnifier();
   exitKnockout();
+  exitResize();
   canvasShell.classList.toggle("shape-mode", Boolean(tool));
   canvasShell.classList.remove("add-mode", "picker-mode");
   els.labelText.classList.remove("active-input");
@@ -996,6 +1142,7 @@ function setPickerMode(target) {
   els.rectShapeBtn.classList.remove("active");
   els.ellipseShapeBtn.classList.remove("active");
   exitKnockout();
+  exitResize();
   showToast(`${target === "fill" ? "채우기" : "경계선"} 색으로 사용할 지점을 클릭하세요.`);
 }
 
@@ -1003,6 +1150,13 @@ function exitKnockout() {
   els.knockoutBar.hidden = true;
   els.knockoutBtn.classList.remove("active");
   canvasShell.classList.remove("knockout-mode");
+}
+
+function exitResize() {
+  state.resizeFrame = null;
+  if (state.mode === "canvasResize") state.mode = "select";
+  els.resizeBar.hidden = true;
+  els.canvasResizeBtn.classList.remove("active");
 }
 
 function setKnockoutMode(active) {
@@ -1017,6 +1171,7 @@ function setKnockoutMode(active) {
   state.pickerTarget = "";
   state.polygonDraft = null;
   hideMagnifier();
+  exitResize();
   canvasShell.classList.remove("add-mode", "shape-mode", "picker-mode");
   els.labelText.classList.remove("active-input");
   for (const button of presetButtons.values()) button.classList.remove("active");
@@ -1236,6 +1391,7 @@ async function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "
     state.nextShapeId = 1;
     setAddMode(false);
     exitKnockout();
+    exitResize();
     clearHistory();
     setDirty(false);
     fitZoom();
@@ -1261,6 +1417,7 @@ async function loadProject(project, filePath = "") {
     state.nextShapeId = Math.max(1, ...state.shapes.map((shape) => Number(shape.id) || 0)) + 1;
     setAddMode(false);
     exitKnockout();
+    exitResize();
     clearHistory();
     setDirty(false);
     fitZoom();
@@ -1499,29 +1656,15 @@ els.knockoutTolerance.addEventListener("input", () => {
 });
 
 els.canvasResizeBtn.addEventListener("click", () => {
-  if (!requireImage()) return;
-  els.resizeTop.value = 0;
-  els.resizeBottom.value = 0;
-  els.resizeLeft.value = 0;
-  els.resizeRight.value = 0;
-  els.resizeDialog.showModal();
+  setCanvasResizeMode(state.mode !== "canvasResize");
 });
 
-els.resizeCloseBtn.addEventListener("click", () => els.resizeDialog.close());
-els.resizeDialog.addEventListener("click", (event) => {
-  if (event.target === els.resizeDialog) els.resizeDialog.close();
-});
+els.resizeApplyBtn.addEventListener("click", applyCanvasResize);
+els.resizeCancelBtn.addEventListener("click", () => setCanvasResizeMode(false));
 
-els.resizeApplyBtn.addEventListener("click", () => {
-  const bg = document.querySelector('input[name="resizeBg"]:checked');
-  resizeCanvas(
-    Number(els.resizeTop.value),
-    Number(els.resizeRight.value),
-    Number(els.resizeBottom.value),
-    Number(els.resizeLeft.value),
-    bg ? bg.value : "transparent"
-  );
-  els.resizeDialog.close();
+els.resizeBgSelect.addEventListener("change", () => {
+  state.resizeBg = els.resizeBgSelect.value;
+  if (state.mode === "canvasResize") render();
 });
 
 const helpPages = Array.from(els.helpDialog.querySelectorAll(".help-page"));
@@ -1804,6 +1947,15 @@ canvas.addEventListener("pointerdown", (event) => {
     return;
   }
 
+  if (state.mode === "canvasResize") {
+    const key = hitResizeHandle(point);
+    if (key) {
+      state.dragging = { type: "resize", key };
+      canvas.setPointerCapture(event.pointerId);
+    }
+    return;
+  }
+
   if (state.mode === "picker") {
     const color = sampleImageColor(point);
     if (state.pickerTarget === "fill") {
@@ -1927,6 +2079,12 @@ canvas.addEventListener("pointermove", (event) => {
   if (!state.dragging) return;
   const point = getCanvasPoint(event);
 
+  if (state.dragging.type === "resize") {
+    updateResizeFrameFromPoint(state.dragging.key, point);
+    render();
+    return;
+  }
+
   if (state.dragging.type === "new-shape" || state.dragging.type === "shape") {
     const shape = state.shapes.find((item) => item.id === state.dragging.id);
     if (!shape) return;
@@ -2040,6 +2198,18 @@ document.addEventListener("keydown", (event) => {
   if (state.mode === "knockout" && event.key === "Escape") {
     setKnockoutMode(false);
     return;
+  }
+
+  if (state.mode === "canvasResize") {
+    if (event.key === "Escape") {
+      setCanvasResizeMode(false);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      applyCanvasResize();
+      return;
+    }
   }
 
   if (state.polygonDraft) {

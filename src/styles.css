@@ -402,19 +402,38 @@ button.wide {
 
 .knockout-bar {
   position: fixed;
-  top: 64px;
+  top: 62px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 25;
   display: flex;
   align-items: center;
   gap: 14px;
+  max-width: calc(100vw - 32px);
   padding: 8px 14px;
   border-radius: 8px;
   background: #111;
   color: #fff;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
   font-size: 13px;
+}
+
+.knockout-bar[hidden] {
+  display: none !important;
+}
+
+#knockoutBtn.active,
+#canvasResizeBtn.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.knockout-bar select {
+  width: auto;
+  height: 26px;
+  padding: 0 6px;
+  color: #111;
 }
 
 .knockout-tol {
