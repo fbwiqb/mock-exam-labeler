@@ -1,6 +1,6 @@
 {
   "name": "mock-exam-labeler",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Local label editor for Korean mock exam illustrations",
   "main": "electron/main.js",
   "author": {
@@ -16,6 +16,7 @@
   "build": {
     "appId": "kr.cnsa.mockExamLabeler",
     "productName": "모의고사 라벨러",
+    "afterPack": "build/afterPack.js",
     "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "release"
@@ -61,7 +62,8 @@
   },
   "devDependencies": {
     "electron": "^31.7.7",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "rcedit": "^5.0.2"
   },
   "dependencies": {
     "electron-updater": "^6.8.9"
