@@ -98,6 +98,9 @@ const els = {
   helpNextBtn: document.getElementById("helpNextBtn"),
   helpPageInfo: document.getElementById("helpPageInfo"),
   toast: document.getElementById("toast"),
+  updateProgress: document.getElementById("updateProgress"),
+  updateProgressText: document.getElementById("updateProgressText"),
+  updateProgressBar: document.getElementById("updateProgressBar"),
   undoBtn: document.getElementById("undoBtn"),
   redoBtn: document.getElementById("redoBtn")
 };
@@ -2580,6 +2583,20 @@ window.addEventListener("resize", () => {
 
 window.labeler.onOpenProjectData((payload) => {
   if (payload?.project) loadProject(payload.project, payload.filePath || "");
+});
+
+window.labeler.onUpdateProgress((payload) => {
+  const percent = Math.max(0, Math.min(100, Math.round(payload?.percent || 0)));
+  els.updateProgress.hidden = false;
+  els.updateProgressBar.style.width = `${percent}%`;
+  if (payload?.done) {
+    els.updateProgressText.textContent = "다운로드 완료 — 설치 준비됨";
+    window.setTimeout(() => {
+      els.updateProgress.hidden = true;
+    }, 4000);
+    return;
+  }
+  els.updateProgressText.textContent = `업데이트 다운로드 중… ${percent}%`;
 });
 
 render();

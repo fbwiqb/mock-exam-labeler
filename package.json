@@ -1,6 +1,6 @@
 {
   "name": "mock-exam-labeler",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "Local label editor for Korean mock exam illustrations",
   "main": "electron/main.js",
   "author": {

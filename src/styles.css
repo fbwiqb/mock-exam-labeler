@@ -748,6 +748,41 @@ button.wide {
   font-size: 14px;
 }
 
+.update-progress {
+  position: fixed;
+  left: 50%;
+  bottom: 54px;
+  z-index: 40;
+  transform: translateX(-50%);
+  width: min(360px, calc(100vw - 48px));
+  padding: 10px 16px 12px;
+  border-radius: 8px;
+  background: #111;
+  color: #fff;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  font-size: 13px;
+}
+
+.update-progress[hidden] {
+  display: none;
+}
+
+.update-progress-track {
+  margin-top: 8px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+  overflow: hidden;
+}
+
+.update-progress-bar {
+  width: 0%;
+  height: 100%;
+  border-radius: 999px;
+  background: #4c9aff;
+  transition: width 0.15s ease;
+}
+
 .app-footer {
   height: 38px;
   position: relative;

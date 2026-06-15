@@ -9,5 +9,6 @@ contextBridge.exposeInMainWorld("labeler", {
   saveProject: (payload) => ipcRenderer.invoke("save-project", payload),
   saveDataUrl: (payload) => ipcRenderer.invoke("save-data-url", payload),
   setDirtyState: (dirty) => ipcRenderer.send("set-dirty-state", dirty),
-  onOpenProjectData: (callback) => ipcRenderer.on("open-project-data", (_event, payload) => callback(payload))
+  onOpenProjectData: (callback) => ipcRenderer.on("open-project-data", (_event, payload) => callback(payload)),
+  onUpdateProgress: (callback) => ipcRenderer.on("update-progress", (_event, payload) => callback(payload))
 });

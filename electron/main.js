@@ -35,10 +35,26 @@ function setupAutoUpdate() {
       cancelId: 1,
       noLink: true
     });
-    if (result.response === 0) autoUpdater.downloadUpdate().catch((error) => console.error(error));
+    if (result.response === 0) {
+      if (mainWindow) mainWindow.webContents.send("update-progress", { percent: 0 });
+      autoUpdater.downloadUpdate().catch((error) => console.error(error));
+    }
+  });
+
+  autoUpdater.on("download-progress", (progress) => {
+    if (!mainWindow) return;
+    mainWindow.setProgressBar(Math.max(0, Math.min(1, (progress.percent || 0) / 100)));
+    mainWindow.webContents.send("update-progress", {
+      percent: progress.percent || 0,
+      bytesPerSecond: progress.bytesPerSecond || 0
+    });
   });
 
   autoUpdater.on("update-downloaded", async (info) => {
+    if (mainWindow) {
+      mainWindow.setProgressBar(-1);
+      mainWindow.webContents.send("update-progress", { percent: 100, done: true });
+    }
     const result = await dialog.showMessageBox(mainWindow, {
       type: "info",
       title: "업데이트 준비 완료",
