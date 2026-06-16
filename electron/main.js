@@ -358,7 +358,7 @@ ipcMain.handle("save-data-url", async (_event, payload) => {
     const result = await dialog.showSaveDialog(mainWindow, {
       title: payload.title || "PNG 저장",
       defaultPath: sourcePath ? path.join(path.dirname(sourcePath), defaultName) : defaultName,
-      filters: [
+      filters: Array.isArray(payload.filters) && payload.filters.length ? payload.filters : [
         { name: "PNG", extensions: ["png"] }
       ]
     });

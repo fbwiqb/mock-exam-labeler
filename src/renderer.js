@@ -31,6 +31,7 @@ const els = {
   resizeCancelBtn: document.getElementById("resizeCancelBtn"),
   saveProjectBtn: document.getElementById("saveProjectBtn"),
   saveImageBtn: document.getElementById("saveImageBtn"),
+  saveSvgBtn: document.getElementById("saveSvgBtn"),
   labelText: document.getElementById("labelText"),
   presetGrid: document.getElementById("presetGrid"),
   formulaBtn: document.getElementById("formulaBtn"),
@@ -1716,6 +1717,127 @@ async function saveImage() {
   }
 }
 
+function svgEscape(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[char]));
+}
+
+function shapeToSvg(shape) {
+  const rect = normalizedShapeRect(shape);
+  const fill = shape.fillEnabled ? (shape.fillColor || "#ffffff") : "none";
+  const stroke = shape.strokeEnabled && shape.strokeWidth > 0 ? (shape.strokeColor || "#111111") : "none";
+  const sw = shape.strokeWidth || 0;
+  const common = `fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round"`;
+  if (shape.kind === "ellipse") {
+    return `<ellipse cx="${rect.x + rect.width / 2}" cy="${rect.y + rect.height / 2}" rx="${rect.width / 2}" ry="${rect.height / 2}" ${common}/>`;
+  }
+  if (shape.kind === "polygon") {
+    return `<polygon points="${shape.points.map((p) => `${p.x},${p.y}`).join(" ")}" ${common}/>`;
+  }
+  return `<rect x="${rect.x}" y="${rect.y}" width="${rect.width}" height="${rect.height}" ${common}/>`;
+}
+
+function leaderToSvg(label) {
+  const leader = normalizedLeader(label);
+  if (!leader.enabled) return "";
+  const end = labelAnchorPoint(label, leader);
+  let points;
+  let fromX = end.x;
+  let fromY = end.y;
+  if (leader.shape === "elbow") {
+    const midX = leader.x + (end.x - leader.x) * 0.58;
+    fromX = midX;
+    fromY = leader.y;
+    points = [[leader.x, leader.y], [midX, leader.y], [midX, end.y], [end.x, end.y]];
+  } else {
+    points = [[leader.x, leader.y], [end.x, end.y]];
+  }
+  let dash = "";
+  if (leader.style === "dash") dash = ` stroke-dasharray="${leader.width * 5},${leader.width * 3}"`;
+  else if (leader.style === "dot") dash = ` stroke-dasharray="${leader.width},${leader.width * 3}"`;
+  const parts = [`<polyline points="${points.map((p) => `${Math.round(p[0])},${Math.round(p[1])}`).join(" ")}" fill="none" stroke="#111111" stroke-width="${leader.width}" stroke-linecap="round" stroke-linejoin="round"${dash}/>`];
+  if (leader.arrow) {
+    const angle = Math.atan2(leader.y - fromY, leader.x - fromX);
+    const size = Number.isFinite(leader.arrowSize) ? leader.arrowSize : 12;
+    const spread = 0.42;
+    const back = angle + Math.PI;
+    const p1x = leader.x + Math.cos(back - spread) * size;
+    const p1y = leader.y + Math.sin(back - spread) * size;
+    const p2x = leader.x + Math.cos(back + spread) * size;
+    const p2y = leader.y + Math.sin(back + spread) * size;
+    if (leader.arrowShape === "open") {
+      parts.push(`<polyline points="${p1x.toFixed(1)},${p1y.toFixed(1)} ${leader.x},${leader.y} ${p2x.toFixed(1)},${p2y.toFixed(1)}" fill="none" stroke="#111111" stroke-width="${Math.max(1.4, leader.width)}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    } else {
+      parts.push(`<polygon points="${leader.x},${leader.y} ${p1x.toFixed(1)},${p1y.toFixed(1)} ${p2x.toFixed(1)},${p2y.toFixed(1)}" fill="#111111"/>`);
+    }
+  }
+  return parts.join("");
+}
+
+function labelToSvg(label) {
+  const bounds = labelBounds(label);
+  const parts = [];
+  if (label.background !== "none") {
+    const bg = label.background === "gray" ? "#eeeeee" : "#ffffff";
+    parts.push(`<rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="${bg}" stroke="#111111" stroke-width="1"/>`);
+  }
+  const textX = bounds.x + bounds.padding;
+  const textY = bounds.y + bounds.padding;
+  const base = label.fontSize;
+  const tspans = bounds.layout.runs.filter((run) => run.text).map((run) => {
+    const x = (textX + run.dx).toFixed(1);
+    const y = (textY + run.dy + run.size * 0.8).toFixed(1);
+    return `<tspan x="${x}" y="${y}" font-size="${run.size}">${svgEscape(run.text)}</tspan>`;
+  }).join("");
+  const family = svgEscape(label.fontFamily || "Batang, serif");
+  const weight = label.bold ? "700" : "400";
+  const fontStyle = label.italic ? "italic" : "normal";
+  const outline = label.outline
+    ? ` stroke="${label.color === "#ffffff" ? "#111111" : "#ffffff"}" stroke-width="${Math.max(3, Math.round(base * 0.13))}" paint-order="stroke" stroke-linejoin="round"`
+    : "";
+  parts.push(`<text font-family="${family}" font-weight="${weight}" font-style="${fontStyle}" fill="${label.color}"${outline}>${tspans}</text>`);
+  if (label.underline) {
+    const gap = Math.max(3, Math.round(base * 0.14));
+    const uy = textY + Math.round(base * 1.02) + gap;
+    const lw = Math.max(1.2, Math.round(base * 0.075));
+    parts.push(`<line x1="${(textX - 1).toFixed(1)}" y1="${uy}" x2="${(textX + bounds.textWidth + 1).toFixed(1)}" y2="${uy}" stroke="${label.color}" stroke-width="${lw}"/>`);
+  }
+  return parts.join("");
+}
+
+function buildSvg() {
+  const w = state.image.naturalWidth;
+  const h = state.image.naturalHeight;
+  const parts = [`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`];
+  parts.push(`<image x="0" y="0" width="${w}" height="${h}" preserveAspectRatio="none" xlink:href="${state.imageDataUrl}" href="${state.imageDataUrl}"/>`);
+  for (const shape of state.shapes) parts.push(shapeToSvg(shape));
+  for (const label of state.labels) {
+    const leader = leaderToSvg(label);
+    if (leader) parts.push(leader);
+  }
+  for (const label of state.labels) parts.push(labelToSvg(label));
+  parts.push("</svg>");
+  return parts.join("\n");
+}
+
+async function saveSvg() {
+  if (!requireImage()) return;
+  const svg = buildSvg();
+  const dataUrl = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+  const base = safeBaseName();
+  const saved = await window.labeler.saveDataUrl({
+    dataUrl,
+    defaultName: `${base}_labeled.svg`,
+    imagePath: state.imagePath,
+    projectPath: state.projectPath,
+    title: "SVG 저장",
+    filters: [{ name: "SVG", extensions: ["svg"] }]
+  });
+  if (saved) {
+    setStatus(`SVG 저장 완료: ${saved}`);
+    showToast("SVG 저장 완료 — PPT에 넣고 그룹 해제하면 요소별로 편집됩니다.");
+  }
+}
+
 async function readDroppedFile(file) {
   if (!file) return;
   const filePath = window.labeler.getPathForFile(file);
@@ -1900,6 +2022,7 @@ els.saveProjectBtn.addEventListener("click", async () => {
 });
 
 els.saveImageBtn.addEventListener("click", saveImage);
+els.saveSvgBtn.addEventListener("click", saveSvg);
 
 els.alignLeft.addEventListener("click", () => alignSelectedLabels("left"));
 els.alignCenterX.addEventListener("click", () => alignSelectedLabels("centerX"));
