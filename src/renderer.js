@@ -387,11 +387,18 @@ function selectionHasGroup() {
 
 function groupSelection() {
   if (selectionCount() < 2) return;
+  const members = [...selectedLabels(), ...selectedShapes()];
+  const gids = new Set(members.map((obj) => obj.groupId));
+  if (gids.size === 1 && !gids.has(undefined)) {
+    const onlyGid = [...gids][0];
+    const memberCount = groupMemberLabelIds(onlyGid).length + groupMemberShapeIds(onlyGid).length;
+    if (memberCount === members.length) return;
+  }
   pushHistory();
   const groupId = state.nextGroupId++;
   state.groups.push({ id: groupId, name: `그룹 ${groupId}` });
-  for (const label of selectedLabels()) label.groupId = groupId;
-  for (const shape of selectedShapes()) shape.groupId = groupId;
+  for (const obj of members) obj.groupId = groupId;
+  pruneEmptyGroups();
   setDirty(true);
   render();
 }
@@ -503,6 +510,11 @@ function updateAlignToolbar() {
   if (els.groupTools) els.groupTools.hidden = !showGroupTools;
   if (els.groupBtn) els.groupBtn.disabled = total < 2;
   if (els.ungroupBtn) els.ungroupBtn.disabled = !selectionHasGroup();
+  if (els.knockoutBtn) {
+    const hasPieces = state.shapes.some((s) => s.kind === "image");
+    els.knockoutBtn.disabled = !state.image || hasPieces;
+    els.knockoutBtn.title = hasPieces ? "SVG 조각 이미지에서는 누끼를 쓸 수 없습니다" : "특정 색을 투명하게 (누끼)";
+  }
   updateContextBar();
 }
 
