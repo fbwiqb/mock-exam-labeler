@@ -683,6 +683,12 @@ button.wide {
   background: var(--accent);
 }
 
+.leader-badge.group {
+  border-color: #7a5cff;
+  color: #fff;
+  background: #7a5cff;
+}
+
 .row-actions {
   margin-top: 8px;
 }

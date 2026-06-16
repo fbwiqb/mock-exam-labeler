@@ -15,6 +15,9 @@ const els = {
   knockoutDoneBtn: document.getElementById("knockoutDoneBtn"),
   canvasResizeBtn: document.getElementById("canvasResizeBtn"),
   contextBar: document.getElementById("contextBar"),
+  groupTools: document.getElementById("groupTools"),
+  groupBtn: document.getElementById("groupBtn"),
+  ungroupBtn: document.getElementById("ungroupBtn"),
   alignGroup: document.getElementById("alignGroup"),
   alignLeft: document.getElementById("alignLeft"),
   alignCenterX: document.getElementById("alignCenterX"),
@@ -119,6 +122,9 @@ const state = {
   selectedId: null,
   selectedIds: [],
   selectedShapeId: null,
+  selectedShapeIds: [],
+  groups: [],
+  nextGroupId: 1,
   nextId: 1,
   nextShapeId: 1,
   zoom: 1,
@@ -177,6 +183,9 @@ function snapshotState() {
     selectedId: state.selectedId,
     selectedIds: state.selectedIds.slice(),
     selectedShapeId: state.selectedShapeId,
+    selectedShapeIds: state.selectedShapeIds.slice(),
+    groups: JSON.parse(JSON.stringify(state.groups)),
+    nextGroupId: state.nextGroupId,
     nextId: state.nextId,
     nextShapeId: state.nextShapeId,
     imageDataUrl: state.imageDataUrl
@@ -189,6 +198,9 @@ function applySnapshotData(snapshot) {
   state.selectedId = snapshot.selectedId;
   state.selectedIds = (snapshot.selectedIds || (snapshot.selectedId ? [snapshot.selectedId] : [])).slice();
   state.selectedShapeId = snapshot.selectedShapeId || null;
+  state.selectedShapeIds = (snapshot.selectedShapeIds || (snapshot.selectedShapeId ? [snapshot.selectedShapeId] : [])).slice();
+  state.groups = Array.isArray(snapshot.groups) ? JSON.parse(JSON.stringify(snapshot.groups)) : [];
+  state.nextGroupId = snapshot.nextGroupId || (state.groups.reduce((m, g) => Math.max(m, g.id), 0) + 1);
   state.nextId = snapshot.nextId;
   state.nextShapeId = snapshot.nextShapeId || 1;
   state.polygonDraft = null;
@@ -312,6 +324,103 @@ function selectLabel(id, additive) {
   }
 }
 
+function selectedShapes() {
+  return state.shapes.filter((shape) => state.selectedShapeIds.includes(shape.id));
+}
+
+function clearShapeSelection() {
+  state.selectedShapeIds = [];
+  state.selectedShapeId = null;
+}
+
+function clearAllSelection() {
+  clearLabelSelection();
+  clearShapeSelection();
+}
+
+function selectionCount() {
+  return state.selectedIds.length + state.selectedShapeIds.length;
+}
+
+function selectShape(id, additive) {
+  if (!additive) {
+    state.selectedShapeIds = [id];
+    state.selectedShapeId = id;
+    return;
+  }
+  if (state.selectedShapeIds.includes(id)) {
+    state.selectedShapeIds = state.selectedShapeIds.filter((other) => other !== id);
+    if (state.selectedShapeId === id) state.selectedShapeId = state.selectedShapeIds[state.selectedShapeIds.length - 1] || null;
+  } else {
+    state.selectedShapeIds.push(id);
+    state.selectedShapeId = id;
+  }
+}
+
+function groupMemberLabelIds(groupId) {
+  return state.labels.filter((l) => l.groupId === groupId).map((l) => l.id);
+}
+
+function groupMemberShapeIds(groupId) {
+  return state.shapes.filter((s) => s.groupId === groupId).map((s) => s.id);
+}
+
+function selectGroup(groupId, additive) {
+  const labelIds = groupMemberLabelIds(groupId);
+  const shapeIds = groupMemberShapeIds(groupId);
+  if (!additive) {
+    state.selectedIds = labelIds.slice();
+    state.selectedShapeIds = shapeIds.slice();
+    state.selectedId = labelIds[labelIds.length - 1] || null;
+    state.selectedShapeId = shapeIds[shapeIds.length - 1] || null;
+    return;
+  }
+  for (const id of labelIds) if (!state.selectedIds.includes(id)) state.selectedIds.push(id);
+  for (const id of shapeIds) if (!state.selectedShapeIds.includes(id)) state.selectedShapeIds.push(id);
+  if (labelIds.length) state.selectedId = labelIds[labelIds.length - 1];
+  if (shapeIds.length) state.selectedShapeId = shapeIds[shapeIds.length - 1];
+}
+
+function selectionHasGroup() {
+  return [...selectedLabels(), ...selectedShapes()].some((obj) => obj.groupId);
+}
+
+function groupSelection() {
+  if (selectionCount() < 2) return;
+  pushHistory();
+  const groupId = state.nextGroupId++;
+  state.groups.push({ id: groupId, name: `그룹 ${groupId}` });
+  for (const label of selectedLabels()) label.groupId = groupId;
+  for (const shape of selectedShapes()) shape.groupId = groupId;
+  setDirty(true);
+  render();
+}
+
+function ungroupSelection() {
+  const ids = new Set([...selectedLabels(), ...selectedShapes()].map((obj) => obj.groupId).filter((g) => g != null));
+  if (!ids.size) return;
+  pushHistory();
+  for (const label of state.labels) if (ids.has(label.groupId)) delete label.groupId;
+  for (const shape of state.shapes) if (ids.has(shape.groupId)) delete shape.groupId;
+  state.groups = state.groups.filter((g) => !ids.has(g.id));
+  setDirty(true);
+  render();
+}
+
+function pruneEmptyGroups() {
+  state.groups = state.groups.filter((g) =>
+    state.labels.some((l) => l.groupId === g.id) || state.shapes.some((s) => s.groupId === g.id));
+}
+
+function startObjectDrag(point) {
+  const labels = selectedLabels().map((label) => ({ id: label.id, ox: point.x - label.x, oy: point.y - label.y }));
+  const shapes = selectedShapes().map((shape) => {
+    const rect = normalizedShapeRect(shape);
+    return { id: shape.id, ox: point.x - rect.x, oy: point.y - rect.y };
+  });
+  return { type: "objects", labels, shapes, changed: false };
+}
+
 function moveLabelBy(label, dx, dy) {
   if (!dx && !dy) return;
   label.x = Math.round(label.x + dx);
@@ -382,13 +491,18 @@ function distributeSelectedLabels(axis) {
 
 function updateContextBar() {
   if (!els.contextBar) return;
-  els.contextBar.hidden = els.alignGroup.hidden && els.knockoutBar.hidden && els.resizeBar.hidden;
+  els.contextBar.hidden = els.alignGroup.hidden && els.knockoutBar.hidden && els.resizeBar.hidden && els.groupTools.hidden;
 }
 
 function updateAlignToolbar() {
   const showAlign = state.mode === "select" && state.selectedIds.length >= 2;
   if (els.alignGroup) els.alignGroup.hidden = !showAlign;
   if (els.distributeWrap) els.distributeWrap.hidden = !(showAlign && state.selectedIds.length >= 3);
+  const total = selectionCount();
+  const showGroupTools = state.mode === "select" && (total >= 2 || selectionHasGroup());
+  if (els.groupTools) els.groupTools.hidden = !showGroupTools;
+  if (els.groupBtn) els.groupBtn.disabled = total < 2;
+  if (els.ungroupBtn) els.ungroupBtn.disabled = !selectionHasGroup();
   updateContextBar();
 }
 
@@ -408,14 +522,30 @@ function updateMarqueeSelection() {
   const ry = Math.min(drag.startY, drag.y);
   const rw = Math.abs(drag.x - drag.startX);
   const rh = Math.abs(drag.y - drag.startY);
-  const merged = drag.additive ? drag.base.slice() : [];
+  const hits = (rect) => rect.x < rx + rw && rect.x + rect.width > rx && rect.y < ry + rh && rect.y + rect.height > ry;
+  const labelIds = drag.additive ? drag.baseLabels.slice() : [];
+  const shapeIds = drag.additive ? drag.baseShapes.slice() : [];
+  const touchedGroups = new Set();
   for (const label of state.labels) {
-    const b = labelBounds(label);
-    const intersects = b.x < rx + rw && b.x + b.width > rx && b.y < ry + rh && b.y + b.height > ry;
-    if (intersects && !merged.includes(label.id)) merged.push(label.id);
+    if (hits(labelBounds(label))) {
+      if (!labelIds.includes(label.id)) labelIds.push(label.id);
+      if (label.groupId != null) touchedGroups.add(label.groupId);
+    }
   }
-  state.selectedIds = merged;
-  state.selectedId = merged[merged.length - 1] || null;
+  for (const shape of state.shapes) {
+    if (hits(normalizedShapeRect(shape))) {
+      if (!shapeIds.includes(shape.id)) shapeIds.push(shape.id);
+      if (shape.groupId != null) touchedGroups.add(shape.groupId);
+    }
+  }
+  for (const groupId of touchedGroups) {
+    for (const id of groupMemberLabelIds(groupId)) if (!labelIds.includes(id)) labelIds.push(id);
+    for (const id of groupMemberShapeIds(groupId)) if (!shapeIds.includes(id)) shapeIds.push(id);
+  }
+  state.selectedIds = labelIds;
+  state.selectedShapeIds = shapeIds;
+  state.selectedId = labelIds[labelIds.length - 1] || null;
+  state.selectedShapeId = shapeIds[shapeIds.length - 1] || null;
 }
 
 function drawMarquee(context) {
@@ -774,8 +904,8 @@ function commitPolygon() {
     ...shapeStyleFromControls()
   };
   state.shapes.push(shape);
-  state.selectedShapeId = shape.id;
   clearLabelSelection();
+  selectShape(shape.id, false);
   state.polygonDraft = null;
   setShapeTool("");
   setDirty(true);
@@ -935,8 +1065,7 @@ function setCanvasResizeMode(active) {
   setShapeTool("");
   exitKnockout();
   state.mode = "canvasResize";
-  clearLabelSelection();
-  state.selectedShapeId = null;
+  clearAllSelection();
   state.resizePad = Math.max(120, Math.round(Math.max(state.image.naturalWidth, state.image.naturalHeight) * 0.5));
   state.resizeFrame = { top: 0, right: 0, bottom: 0, left: 0 };
   state.resizeBg = els.resizeBgSelect.value || "transparent";
@@ -1252,7 +1381,7 @@ function drawTo(targetCanvas, options = {}) {
 
   if (includeShapes) {
     for (const shape of state.shapes) {
-      drawShape(targetCtx, shape, includeSelection && shape.id === state.selectedShapeId);
+      drawShape(targetCtx, shape, includeSelection && state.selectedShapeIds.includes(shape.id));
     }
   }
 
@@ -1546,7 +1675,24 @@ function hideMagnifier() {
 
 function updateLabelList() {
   els.labelList.innerHTML = "";
+  for (const group of state.groups) {
+    const labelCount = groupMemberLabelIds(group.id).length;
+    const shapeCount = groupMemberShapeIds(group.id).length;
+    const count = labelCount + shapeCount;
+    if (!count) continue;
+    const anyLabelSel = groupMemberLabelIds(group.id).some((id) => state.selectedIds.includes(id));
+    const anyShapeSel = groupMemberShapeIds(group.id).some((id) => state.selectedShapeIds.includes(id));
+    const row = document.createElement("button");
+    row.className = `label-row${anyLabelSel || anyShapeSel ? " selected" : ""}`;
+    row.innerHTML = `<span class="label-main"><span class="leader-badge group">그룹</span><span class="label-text">${escapeHtml(group.name)}</span></span><span class="label-pos">${count}개</span>`;
+    row.addEventListener("click", (event) => {
+      selectGroup(group.id, event.ctrlKey || event.shiftKey || event.metaKey);
+      render();
+    });
+    els.labelList.appendChild(row);
+  }
   for (const label of state.labels) {
+    if (label.groupId != null) continue;
     const row = document.createElement("button");
     const isSelected = state.selectedIds.includes(label.id);
     const isAnchor = label.id === state.selectedId;
@@ -1554,8 +1700,9 @@ function updateLabelList() {
     const leader = normalizedLeader(label);
     row.innerHTML = `<span class="label-main"><span class="leader-badge${leader.enabled ? " on" : ""}">${leader.enabled ? "지시선" : "라벨"}</span><span class="label-text">${escapeHtml(label.text)}</span></span><span class="label-pos">${Math.round(label.x)}, ${Math.round(label.y)}</span>`;
     row.addEventListener("click", (event) => {
-      selectLabel(label.id, event.ctrlKey || event.shiftKey || event.metaKey);
-      state.selectedShapeId = null;
+      const additive = event.ctrlKey || event.shiftKey || event.metaKey;
+      if (!additive) clearShapeSelection();
+      selectLabel(label.id, additive);
       render();
     });
     els.labelList.appendChild(row);
@@ -1872,9 +2019,12 @@ function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "", ini
     state.projectPath = "";
     state.labels = [];
     state.shapes = Array.isArray(initialShapes) ? initialShapes : [];
+    state.groups = [];
+    state.nextGroupId = 1;
     state.selectedId = null;
     state.selectedIds = [];
     state.selectedShapeId = null;
+    state.selectedShapeIds = [];
     state.polygonDraft = null;
     state.nextId = 1;
     state.nextShapeId = state.shapes.length ? Math.max(...state.shapes.map((s) => Number(s.id) || 0)) + 1 : 1;
@@ -1899,9 +2049,12 @@ async function loadProject(project, filePath = "") {
     state.projectPath = filePath;
     state.labels = Array.isArray(project.labels) ? project.labels : [];
     state.shapes = Array.isArray(project.shapes) ? project.shapes : [];
+    state.groups = Array.isArray(project.groups) ? project.groups : [];
+    state.nextGroupId = state.groups.reduce((m, g) => Math.max(m, Number(g.id) || 0), 0) + 1;
     state.selectedId = null;
     state.selectedIds = [];
     state.selectedShapeId = null;
+    state.selectedShapeIds = [];
     state.polygonDraft = null;
     state.nextId = Math.max(1, ...state.labels.map((label) => Number(label.id) || 0)) + 1;
     state.nextShapeId = Math.max(1, ...state.shapes.map((shape) => Number(shape.id) || 0)) + 1;
@@ -1922,7 +2075,8 @@ function projectPayload() {
     imagePath: state.imagePath,
     imageDataUrl: state.imageDataUrl,
     labels: state.labels,
-    shapes: state.shapes
+    shapes: state.shapes,
+    groups: state.groups
   };
 }
 
@@ -1990,24 +2144,25 @@ async function readDroppedFile(file) {
 }
 
 function deleteSelected() {
-  if (state.selectedShapeId) {
-    deleteSelectedShape();
-    return;
-  }
-  if (!state.selectedIds.length) return;
+  if (!state.selectedIds.length && !state.selectedShapeIds.length) return;
   pushHistory();
-  const ids = new Set(state.selectedIds);
-  state.labels = state.labels.filter((label) => !ids.has(label.id));
-  clearLabelSelection();
+  const labelIds = new Set(state.selectedIds);
+  const shapeIds = new Set(state.selectedShapeIds);
+  state.labels = state.labels.filter((label) => !labelIds.has(label.id));
+  state.shapes = state.shapes.filter((shape) => !shapeIds.has(shape.id));
+  clearAllSelection();
+  pruneEmptyGroups();
   setDirty(true);
   render();
 }
 
 function deleteSelectedShape() {
-  if (!state.selectedShapeId) return;
+  if (!state.selectedShapeIds.length) return;
   pushHistory();
-  state.shapes = state.shapes.filter((shape) => shape.id !== state.selectedShapeId);
-  state.selectedShapeId = null;
+  const ids = new Set(state.selectedShapeIds);
+  state.shapes = state.shapes.filter((shape) => !ids.has(shape.id));
+  clearShapeSelection();
+  pruneEmptyGroups();
   setDirty(true);
   render();
 }
@@ -2020,18 +2175,30 @@ function duplicateSelected() {
   state.labels.push(...copies);
   state.selectedIds = copies.map((copy) => copy.id);
   state.selectedId = copies[copies.length - 1].id;
-  state.selectedShapeId = null;
+  clearShapeSelection();
   setDirty(true);
   render();
 }
 
 function moveSelected(dx, dy) {
   const labels = selectedLabels();
-  if (!labels.length) return;
+  const shapes = selectedShapes();
+  if (!labels.length && !shapes.length) return;
   pushHistory();
   for (const label of labels) {
     label.x = Math.round(label.x + dx);
     label.y = Math.round(label.y + dy);
+  }
+  for (const shape of shapes) {
+    if (shape.kind === "polygon") {
+      for (const vertex of shape.points) {
+        vertex.x += dx;
+        vertex.y += dy;
+      }
+    } else {
+      shape.x = Math.round(shape.x + dx);
+      shape.y = Math.round(shape.y + dy);
+    }
   }
   setDirty(true);
   render();
@@ -2157,6 +2324,8 @@ els.alignCenterY.addEventListener("click", () => alignSelectedLabels("centerY"))
 els.alignBottom.addEventListener("click", () => alignSelectedLabels("bottom"));
 els.distributeX.addEventListener("click", () => distributeSelectedLabels("x"));
 els.distributeY.addEventListener("click", () => distributeSelectedLabels("y"));
+els.groupBtn.addEventListener("click", groupSelection);
+els.ungroupBtn.addEventListener("click", ungroupSelection);
 
 els.knockoutBtn.addEventListener("click", () => {
   setKnockoutMode(state.mode !== "knockout");
@@ -2523,8 +2692,8 @@ canvas.addEventListener("pointerdown", (event) => {
       ...shapeStyleFromControls()
     };
     state.shapes.push(shape);
-    state.selectedShapeId = shape.id;
     clearLabelSelection();
+    selectShape(shape.id, false);
     state.dragging = { type: "new-shape", id: shape.id, startX: point.x, startY: point.y, changed: true };
     canvas.setPointerCapture(event.pointerId);
     render();
@@ -2537,7 +2706,7 @@ canvas.addEventListener("pointerdown", (event) => {
     state.labels.push(label);
     state.selectedIds = [label.id];
     state.selectedId = label.id;
-    state.selectedShapeId = null;
+    clearShapeSelection();
     const bounds = labelBounds(label);
     state.dragging = { type: "new-label", id: label.id, offsetX: bounds.width / 2, offsetY: bounds.height / 2, changed: true };
     canvas.setPointerCapture(event.pointerId);
@@ -2552,7 +2721,7 @@ canvas.addEventListener("pointerdown", (event) => {
   if (leaderHit) {
     if (!state.selectedIds.includes(leaderHit.id)) selectLabel(leaderHit.id, false);
     else state.selectedId = leaderHit.id;
-    state.selectedShapeId = null;
+    clearShapeSelection();
     pushHistory();
     state.dragging = { type: "leader", id: leaderHit.id, changed: false };
     canvas.setPointerCapture(event.pointerId);
@@ -2563,17 +2732,23 @@ canvas.addEventListener("pointerdown", (event) => {
 
   const hit = hitLabel(point);
   if (hit) {
-    state.selectedShapeId = null;
     if (additive) {
-      selectLabel(hit.id, true);
+      if (hit.groupId != null) selectGroup(hit.groupId, true);
+      else selectLabel(hit.id, true);
       render();
       return;
     }
-    if (!state.selectedIds.includes(hit.id)) selectLabel(hit.id, false);
-    else state.selectedId = hit.id;
+    if (!state.selectedIds.includes(hit.id)) {
+      if (hit.groupId != null) selectGroup(hit.groupId, false);
+      else {
+        clearShapeSelection();
+        selectLabel(hit.id, false);
+      }
+    } else {
+      state.selectedId = hit.id;
+    }
     pushHistory();
-    const moving = selectedLabels().map((label) => ({ id: label.id, offsetX: point.x - label.x, offsetY: point.y - label.y }));
-    state.dragging = { type: "label-group", labels: moving, changed: false };
+    state.dragging = startObjectDrag(point);
     canvas.setPointerCapture(event.pointerId);
     render();
     return;
@@ -2581,19 +2756,30 @@ canvas.addEventListener("pointerdown", (event) => {
 
   const shapeHit = hitShape(point);
   if (shapeHit) {
-    clearLabelSelection();
-    const rect = normalizedShapeRect(shapeHit);
-    state.selectedShapeId = shapeHit.id;
+    if (additive) {
+      if (shapeHit.groupId != null) selectGroup(shapeHit.groupId, true);
+      else selectShape(shapeHit.id, true);
+      render();
+      return;
+    }
+    if (!state.selectedShapeIds.includes(shapeHit.id)) {
+      if (shapeHit.groupId != null) selectGroup(shapeHit.groupId, false);
+      else {
+        clearLabelSelection();
+        selectShape(shapeHit.id, false);
+      }
+    } else {
+      state.selectedShapeId = shapeHit.id;
+    }
     pushHistory();
-    state.dragging = { type: "shape", id: shapeHit.id, offsetX: point.x - rect.x, offsetY: point.y - rect.y, changed: false };
+    state.dragging = startObjectDrag(point);
     canvas.setPointerCapture(event.pointerId);
     render();
     return;
   }
 
-  state.selectedShapeId = null;
-  if (!additive) clearLabelSelection();
-  state.dragging = { type: "marquee", startX: point.x, startY: point.y, x: point.x, y: point.y, additive, base: state.selectedIds.slice() };
+  if (!additive) clearAllSelection();
+  state.dragging = { type: "marquee", startX: point.x, startY: point.y, x: point.x, y: point.y, additive, baseLabels: state.selectedIds.slice(), baseShapes: state.selectedShapeIds.slice() };
   canvas.setPointerCapture(event.pointerId);
   render();
 });
@@ -2623,40 +2809,20 @@ canvas.addEventListener("pointermove", (event) => {
     return;
   }
 
-  if (state.dragging.type === "label-group") {
+  if (state.dragging.type === "objects") {
     for (const moving of state.dragging.labels) {
       const target = state.labels.find((label) => label.id === moving.id);
       if (target) {
-        target.x = Math.round(point.x - moving.offsetX);
-        target.y = Math.round(point.y - moving.offsetY);
+        target.x = Math.round(point.x - moving.ox);
+        target.y = Math.round(point.y - moving.oy);
       }
     }
-    state.dragging.changed = true;
-    scheduleRender();
-    return;
-  }
-
-  if (state.dragging.type === "new-shape" || state.dragging.type === "shape") {
-    const shape = state.shapes.find((item) => item.id === state.dragging.id);
-    if (!shape) return;
-    if (state.dragging.type === "new-shape") {
-      let nextW = Math.round(point.x - state.dragging.startX);
-      let nextH = Math.round(point.y - state.dragging.startY);
-      if (event.shiftKey) {
-        const size = Math.max(Math.abs(nextW), Math.abs(nextH));
-        nextW = size * (nextW < 0 ? -1 : 1);
-        nextH = size * (nextH < 0 ? -1 : 1);
-      }
-      shape.x = Math.round(state.dragging.startX);
-      shape.y = Math.round(state.dragging.startY);
-      shape.width = nextW;
-      shape.height = nextH;
-    } else {
+    for (const moving of state.dragging.shapes) {
+      const shape = state.shapes.find((item) => item.id === moving.id);
+      if (!shape) continue;
       const rect = normalizedShapeRect(shape);
-      const nextX = Math.round(point.x - state.dragging.offsetX);
-      const nextY = Math.round(point.y - state.dragging.offsetY);
-      const dx = nextX - rect.x;
-      const dy = nextY - rect.y;
+      const dx = Math.round(point.x - moving.ox) - rect.x;
+      const dy = Math.round(point.y - moving.oy) - rect.y;
       if (shape.kind === "polygon") {
         for (const vertex of shape.points) {
           vertex.x += dx;
@@ -2667,6 +2833,25 @@ canvas.addEventListener("pointermove", (event) => {
         shape.y += dy;
       }
     }
+    state.dragging.changed = true;
+    scheduleRender();
+    return;
+  }
+
+  if (state.dragging.type === "new-shape") {
+    const shape = state.shapes.find((item) => item.id === state.dragging.id);
+    if (!shape) return;
+    let nextW = Math.round(point.x - state.dragging.startX);
+    let nextH = Math.round(point.y - state.dragging.startY);
+    if (event.shiftKey) {
+      const size = Math.max(Math.abs(nextW), Math.abs(nextH));
+      nextW = size * (nextW < 0 ? -1 : 1);
+      nextH = size * (nextH < 0 ? -1 : 1);
+    }
+    shape.x = Math.round(state.dragging.startX);
+    shape.y = Math.round(state.dragging.startY);
+    shape.width = nextW;
+    shape.height = nextH;
     state.dragging.changed = true;
     scheduleRender();
     return;
@@ -2821,6 +3006,12 @@ document.addEventListener("keydown", (event) => {
   if (event.ctrlKey && event.key.toLowerCase() === "d") {
     event.preventDefault();
     duplicateSelected();
+  }
+
+  if (event.ctrlKey && event.key.toLowerCase() === "g") {
+    event.preventDefault();
+    if (event.shiftKey) ungroupSelection();
+    else groupSelection();
   }
 });
 
