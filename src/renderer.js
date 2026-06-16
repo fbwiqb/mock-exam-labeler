@@ -642,10 +642,40 @@ function normalizedShapeRect(shape) {
   };
 }
 
+const shapeImageCache = new Map();
+
+function getShapeImage(dataUrl) {
+  if (!dataUrl) return null;
+  const cached = shapeImageCache.get(dataUrl);
+  if (cached) return cached.ready ? cached.img : null;
+  const entry = { img: new Image(), ready: false };
+  entry.img.onload = () => {
+    entry.ready = true;
+    scheduleRender();
+  };
+  entry.img.src = dataUrl;
+  shapeImageCache.set(dataUrl, entry);
+  return null;
+}
+
 function drawShape(context, shape, selected = false) {
   const rect = normalizedShapeRect(shape);
   context.save();
   context.lineJoin = "round";
+
+  if (shape.kind === "image") {
+    const img = getShapeImage(shape.dataUrl);
+    if (img) context.drawImage(img, rect.x, rect.y, rect.width, rect.height);
+    if (selected) {
+      context.strokeStyle = "#1f4c8f";
+      context.lineWidth = 1;
+      context.setLineDash([4, 3]);
+      context.strokeRect(rect.x - 4, rect.y - 4, rect.width + 8, rect.height + 8);
+      context.setLineDash([]);
+    }
+    context.restore();
+    return;
+  }
 
   if (shape.kind === "ellipse") {
     context.beginPath();
@@ -1666,15 +1696,152 @@ function rasterizeSvg(dataUrl, done) {
   probe.src = dataUrl;
 }
 
-function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "") {
-  if (String(dataUrl).startsWith("data:image/svg+xml")) {
-    rasterizeSvg(dataUrl, (pngUrl) => {
-      if (!pngUrl) {
-        showToast("SVG를 불러오지 못했습니다.");
-        return;
-      }
-      loadImageData(pngUrl, fileName, filePath);
+const SVG_NON_RENDER = new Set(["defs", "style", "title", "desc", "metadata", "symbol", "lineargradient", "radialgradient", "filter", "clippath", "mask", "pattern"]);
+
+function svgRenderableChildren(node) {
+  return Array.from(node.children).filter((el) => !SVG_NON_RENDER.has(el.tagName.toLowerCase()));
+}
+
+function svgDescendToPieces(root) {
+  let node = root;
+  let kids = svgRenderableChildren(node);
+  while (kids.length === 1 && kids[0].tagName.toLowerCase() === "g") {
+    node = kids[0];
+    kids = svgRenderableChildren(node);
+  }
+  return kids;
+}
+
+function svgStringToImage(svgStr) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgStr)))}`;
+  });
+}
+
+function loadSvgFallback(dataUrl, fileName, filePath) {
+  rasterizeSvg(dataUrl, (pngUrl) => {
+    if (!pngUrl) {
+      showToast("SVG를 불러오지 못했습니다.");
+      return;
+    }
+    loadImageData(pngUrl, fileName, filePath);
+  });
+}
+
+async function loadSvgPieces(dataUrl, fileName, filePath) {
+  try {
+    await loadSvgPiecesInner(dataUrl, fileName, filePath);
+  } catch (_error) {
+    loadSvgFallback(dataUrl, fileName, filePath);
+  }
+}
+
+async function loadSvgPiecesInner(dataUrl, fileName, filePath) {
+  let svgText = "";
+  try {
+    svgText = decodeURIComponent(escape(atob(dataUrl.slice(dataUrl.indexOf(",") + 1))));
+  } catch (_error) {
+    svgText = "";
+  }
+  if (!svgText) {
+    loadSvgFallback(dataUrl, fileName, filePath);
+    return;
+  }
+  const size = svgRasterSize(svgText, 1000);
+  const W = size.w;
+  const H = size.h;
+  let doc = null;
+  try {
+    doc = new DOMParser().parseFromString(svgText, "image/svg+xml");
+  } catch (_error) {
+    doc = null;
+  }
+  const svg = doc && doc.documentElement;
+  if (!svg || svg.tagName.toLowerCase() !== "svg" || svg.querySelector("parsererror")) {
+    loadSvgFallback(dataUrl, fileName, filePath);
+    return;
+  }
+  svg.setAttribute("width", String(W));
+  svg.setAttribute("height", String(H));
+  if (!svg.getAttribute("viewBox")) svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.style.position = "absolute";
+  svg.style.left = "-99999px";
+  svg.style.top = "0px";
+  svg.style.opacity = "0";
+  svg.style.pointerEvents = "none";
+  document.body.appendChild(svg);
+
+  const MAX_PIECES = 80;
+  const pieces = svgDescendToPieces(svg);
+  if (pieces.length < 2 || pieces.length > MAX_PIECES) {
+    document.body.removeChild(svg);
+    if (pieces.length > MAX_PIECES) showToast(`조각이 너무 많아(${pieces.length}개) 한 장으로 불러왔습니다.`);
+    loadSvgFallback(dataUrl, fileName, filePath);
+    return;
+  }
+
+  const svgRect = svg.getBoundingClientRect();
+  const metas = pieces.map((p) => {
+    const r = p.getBoundingClientRect();
+    return { x: r.left - svgRect.left, y: r.top - svgRect.top, w: r.width, h: r.height };
+  });
+  const scale = Math.max(1, Math.min(3, 4000 / Math.max(W, H)));
+  const fullW = Math.round(W * scale);
+  const fullH = Math.round(H * scale);
+  const shapes = [];
+  let nextShapeId = 1;
+
+  for (let i = 0; i < pieces.length; i += 1) {
+    const meta = metas[i];
+    if (meta.w < 1 || meta.h < 1) continue;
+    const clone = svg.cloneNode(true);
+    clone.removeAttribute("style");
+    const clonePieces = svgDescendToPieces(clone);
+    clonePieces.forEach((c, j) => {
+      if (j !== i) c.style.display = "none";
     });
+    let img;
+    try {
+      img = await svgStringToImage(new XMLSerializer().serializeToString(clone));
+    } catch (_error) {
+      continue;
+    }
+    const full = document.createElement("canvas");
+    full.width = fullW;
+    full.height = fullH;
+    full.getContext("2d").drawImage(img, 0, 0, fullW, fullH);
+    const pad = 2;
+    const bx = Math.max(0, meta.x - pad);
+    const by = Math.max(0, meta.y - pad);
+    const bw = Math.min(W - bx, meta.w + pad * 2);
+    const bh = Math.min(H - by, meta.h + pad * 2);
+    if (bw < 1 || bh < 1) continue;
+    const piece = document.createElement("canvas");
+    piece.width = Math.max(1, Math.round(bw * scale));
+    piece.height = Math.max(1, Math.round(bh * scale));
+    piece.getContext("2d").drawImage(full, bx * scale, by * scale, bw * scale, bh * scale, 0, 0, piece.width, piece.height);
+    shapes.push({ id: nextShapeId++, kind: "image", x: Math.round(bx), y: Math.round(by), width: Math.round(bw), height: Math.round(bh), dataUrl: piece.toDataURL("image/png") });
+  }
+  document.body.removeChild(svg);
+
+  if (!shapes.length) {
+    loadSvgFallback(dataUrl, fileName, filePath);
+    return;
+  }
+  const base = document.createElement("canvas");
+  base.width = W;
+  base.height = H;
+  shapes.forEach((shape) => getShapeImage(shape.dataUrl));
+  loadImageData(base.toDataURL("image/png"), fileName, filePath, shapes);
+  showToast(`SVG를 ${shapes.length}개 조각으로 불러왔습니다. 조각을 클릭해 옮기세요.`);
+}
+
+function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "", initialShapes = null) {
+  if (String(dataUrl).startsWith("data:image/svg+xml")) {
+    loadSvgPieces(dataUrl, fileName, filePath);
     return;
   }
   const image = new Image();
@@ -1685,13 +1852,13 @@ function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "") {
     state.imagePath = filePath;
     state.projectPath = "";
     state.labels = [];
-    state.shapes = [];
+    state.shapes = Array.isArray(initialShapes) ? initialShapes : [];
     state.selectedId = null;
     state.selectedIds = [];
     state.selectedShapeId = null;
     state.polygonDraft = null;
     state.nextId = 1;
-    state.nextShapeId = 1;
+    state.nextShapeId = state.shapes.length ? Math.max(...state.shapes.map((s) => Number(s.id) || 0)) + 1 : 1;
     setAddMode(false);
     exitKnockout();
     exitResize();
