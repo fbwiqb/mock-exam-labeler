@@ -1674,6 +1674,12 @@ function svgRasterSize(svgText, fallback) {
   return { w: w || fallback, h: h || fallback };
 }
 
+function svgUpscaledSize(declaredW, declaredH, target = 2000) {
+  const maxDim = Math.max(declaredW || 0, declaredH || 0) || 1000;
+  const up = Math.max(1, Math.min(60, target / maxDim));
+  return { w: Math.max(1, Math.round((declaredW || maxDim) * up)), h: Math.max(1, Math.round((declaredH || maxDim) * up)) };
+}
+
 function rasterizeSvg(dataUrl, done) {
   let svgText = "";
   try {
@@ -1684,12 +1690,11 @@ function rasterizeSvg(dataUrl, done) {
   const probe = new Image();
   probe.onload = () => {
     const size = svgRasterSize(svgText, 0);
-    const w = size.w || probe.naturalWidth || 1000;
-    const h = size.h || probe.naturalHeight || 1000;
+    const target = svgUpscaledSize(size.w || probe.naturalWidth || 1000, size.h || probe.naturalHeight || 1000);
     const work = document.createElement("canvas");
-    work.width = w;
-    work.height = h;
-    work.getContext("2d").drawImage(probe, 0, 0, w, h);
+    work.width = target.w;
+    work.height = target.h;
+    work.getContext("2d").drawImage(probe, 0, 0, target.w, target.h);
     done(work.toDataURL("image/png"));
   };
   probe.onerror = () => done(null);
@@ -1750,9 +1755,10 @@ async function loadSvgPiecesInner(dataUrl, fileName, filePath) {
     loadSvgFallback(dataUrl, fileName, filePath);
     return;
   }
-  const size = svgRasterSize(svgText, 1000);
-  const W = size.w;
-  const H = size.h;
+  const declared = svgRasterSize(svgText, 1000);
+  const upscaled = svgUpscaledSize(declared.w, declared.h);
+  const W = upscaled.w;
+  const H = upscaled.h;
   let doc = null;
   try {
     doc = new DOMParser().parseFromString(svgText, "image/svg+xml");
@@ -1766,7 +1772,7 @@ async function loadSvgPiecesInner(dataUrl, fileName, filePath) {
   }
   svg.setAttribute("width", String(W));
   svg.setAttribute("height", String(H));
-  if (!svg.getAttribute("viewBox")) svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  if (!svg.getAttribute("viewBox")) svg.setAttribute("viewBox", `0 0 ${declared.w} ${declared.h}`);
   svg.style.position = "absolute";
   svg.style.left = "-99999px";
   svg.style.top = "0px";
@@ -1774,13 +1780,27 @@ async function loadSvgPiecesInner(dataUrl, fileName, filePath) {
   svg.style.pointerEvents = "none";
   document.body.appendChild(svg);
 
-  const MAX_PIECES = 80;
+  const ASK_OVER = 80;
+  const HARD_MAX = 300;
   const pieces = svgDescendToPieces(svg);
-  if (pieces.length < 2 || pieces.length > MAX_PIECES) {
+  if (pieces.length < 2) {
     document.body.removeChild(svg);
-    if (pieces.length > MAX_PIECES) showToast(`조각이 너무 많아(${pieces.length}개) 한 장으로 불러왔습니다.`);
     loadSvgFallback(dataUrl, fileName, filePath);
     return;
+  }
+  if (pieces.length > HARD_MAX) {
+    document.body.removeChild(svg);
+    showToast(`조각이 ${pieces.length}개로 너무 많아 한 장(고해상도)으로 불러왔습니다.`);
+    loadSvgFallback(dataUrl, fileName, filePath);
+    return;
+  }
+  if (pieces.length > ASK_OVER) {
+    const proceed = window.confirm(`이 SVG는 조각 ${pieces.length}개로 나뉩니다. 조각이 많으면 불러오기가 느리고 무거울 수 있어요.\n\n[확인] 조각으로 나눠서 불러오기\n[취소] 한 장(고해상도)으로 불러오기`);
+    if (!proceed) {
+      document.body.removeChild(svg);
+      loadSvgFallback(dataUrl, fileName, filePath);
+      return;
+    }
   }
 
   const svgRect = svg.getBoundingClientRect();
@@ -1788,9 +1808,8 @@ async function loadSvgPiecesInner(dataUrl, fileName, filePath) {
     const r = p.getBoundingClientRect();
     return { x: r.left - svgRect.left, y: r.top - svgRect.top, w: r.width, h: r.height };
   });
-  const scale = Math.max(1, Math.min(3, 4000 / Math.max(W, H)));
-  const fullW = Math.round(W * scale);
-  const fullH = Math.round(H * scale);
+  const fullW = W;
+  const fullH = H;
   const shapes = [];
   let nextShapeId = 1;
 
@@ -1820,9 +1839,9 @@ async function loadSvgPiecesInner(dataUrl, fileName, filePath) {
     const bh = Math.min(H - by, meta.h + pad * 2);
     if (bw < 1 || bh < 1) continue;
     const piece = document.createElement("canvas");
-    piece.width = Math.max(1, Math.round(bw * scale));
-    piece.height = Math.max(1, Math.round(bh * scale));
-    piece.getContext("2d").drawImage(full, bx * scale, by * scale, bw * scale, bh * scale, 0, 0, piece.width, piece.height);
+    piece.width = Math.max(1, Math.round(bw));
+    piece.height = Math.max(1, Math.round(bh));
+    piece.getContext("2d").drawImage(full, bx, by, bw, bh, 0, 0, piece.width, piece.height);
     shapes.push({ id: nextShapeId++, kind: "image", x: Math.round(bx), y: Math.round(by), width: Math.round(bw), height: Math.round(bh), dataUrl: piece.toDataURL("image/png") });
   }
   document.body.removeChild(svg);
