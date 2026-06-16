@@ -145,6 +145,7 @@ function extensionToMime(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
   if (ext === ".webp") return "image/webp";
+  if (ext === ".svg") return "image/svg+xml";
   return "image/png";
 }
 
@@ -197,7 +198,7 @@ ipcMain.handle("open-image", async () => {
     title: "이미지 열기",
     properties: ["openFile"],
     filters: [
-      { name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }
+      { name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "svg"] }
     ]
   });
 
@@ -276,7 +277,12 @@ ipcMain.handle("open-project", async () => {
   if (result.canceled || result.filePaths.length === 0) return null;
   const filePath = result.filePaths[0];
   const text = await fs.readFile(filePath, "utf8");
-  return { filePath, project: JSON.parse(text) };
+  try {
+    return { filePath, project: JSON.parse(text) };
+  } catch (_error) {
+    dialog.showErrorBox("프로젝트 열기 실패", "프로젝트 파일이 손상되어 열 수 없습니다.");
+    return null;
+  }
 });
 
 ipcMain.handle("save-project", async (_event, payload) => {

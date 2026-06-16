@@ -31,7 +31,6 @@ const els = {
   resizeCancelBtn: document.getElementById("resizeCancelBtn"),
   saveProjectBtn: document.getElementById("saveProjectBtn"),
   saveImageBtn: document.getElementById("saveImageBtn"),
-  saveSvgBtn: document.getElementById("saveSvgBtn"),
   labelText: document.getElementById("labelText"),
   presetGrid: document.getElementById("presetGrid"),
   formulaBtn: document.getElementById("formulaBtn"),
@@ -192,6 +191,7 @@ function applySnapshotData(snapshot) {
   state.selectedShapeId = snapshot.selectedShapeId || null;
   state.nextId = snapshot.nextId;
   state.nextShapeId = snapshot.nextShapeId || 1;
+  state.polygonDraft = null;
   state.history.applying = false;
   setDirty(true);
   render();
@@ -731,6 +731,7 @@ function drawPolygonDraft(context) {
 function commitPolygon() {
   const draft = state.polygonDraft;
   if (!draft || draft.points.length < 3) {
+    if (draft && draft.points.length > 0) showToast("다각형은 점이 3개 이상이어야 완성됩니다.");
     state.polygonDraft = null;
     render();
     return;
@@ -1625,7 +1626,57 @@ function escapeHtml(value) {
   }[char]));
 }
 
-async function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "") {
+function svgRasterSize(svgText, fallback) {
+  let w = 0;
+  let h = 0;
+  const head = svgText.slice(0, 1000);
+  const wm = head.match(/<svg[^>]*?\bwidth\s*=\s*"([\d.]+)/i);
+  const hm = head.match(/<svg[^>]*?\bheight\s*=\s*"([\d.]+)/i);
+  if (wm) w = Math.round(parseFloat(wm[1]));
+  if (hm) h = Math.round(parseFloat(hm[1]));
+  if (!w || !h) {
+    const vb = head.match(/viewBox\s*=\s*"\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i);
+    if (vb) {
+      if (!w) w = Math.round(parseFloat(vb[1]));
+      if (!h) h = Math.round(parseFloat(vb[2]));
+    }
+  }
+  return { w: w || fallback, h: h || fallback };
+}
+
+function rasterizeSvg(dataUrl, done) {
+  let svgText = "";
+  try {
+    svgText = decodeURIComponent(escape(atob(dataUrl.slice(dataUrl.indexOf(",") + 1))));
+  } catch (_error) {
+    svgText = "";
+  }
+  const probe = new Image();
+  probe.onload = () => {
+    const size = svgRasterSize(svgText, 0);
+    const w = size.w || probe.naturalWidth || 1000;
+    const h = size.h || probe.naturalHeight || 1000;
+    const work = document.createElement("canvas");
+    work.width = w;
+    work.height = h;
+    work.getContext("2d").drawImage(probe, 0, 0, w, h);
+    done(work.toDataURL("image/png"));
+  };
+  probe.onerror = () => done(null);
+  probe.src = dataUrl;
+}
+
+function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "") {
+  if (String(dataUrl).startsWith("data:image/svg+xml")) {
+    rasterizeSvg(dataUrl, (pngUrl) => {
+      if (!pngUrl) {
+        showToast("SVG를 불러오지 못했습니다.");
+        return;
+      }
+      loadImageData(pngUrl, fileName, filePath);
+    });
+    return;
+  }
   const image = new Image();
   image.onload = () => {
     state.image = image;
@@ -1717,127 +1768,6 @@ async function saveImage() {
   }
 }
 
-function svgEscape(value) {
-  return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[char]));
-}
-
-function shapeToSvg(shape) {
-  const rect = normalizedShapeRect(shape);
-  const fill = shape.fillEnabled ? (shape.fillColor || "#ffffff") : "none";
-  const stroke = shape.strokeEnabled && shape.strokeWidth > 0 ? (shape.strokeColor || "#111111") : "none";
-  const sw = shape.strokeWidth || 0;
-  const common = `fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round"`;
-  if (shape.kind === "ellipse") {
-    return `<ellipse cx="${rect.x + rect.width / 2}" cy="${rect.y + rect.height / 2}" rx="${rect.width / 2}" ry="${rect.height / 2}" ${common}/>`;
-  }
-  if (shape.kind === "polygon") {
-    return `<polygon points="${shape.points.map((p) => `${p.x},${p.y}`).join(" ")}" ${common}/>`;
-  }
-  return `<rect x="${rect.x}" y="${rect.y}" width="${rect.width}" height="${rect.height}" ${common}/>`;
-}
-
-function leaderToSvg(label) {
-  const leader = normalizedLeader(label);
-  if (!leader.enabled) return "";
-  const end = labelAnchorPoint(label, leader);
-  let points;
-  let fromX = end.x;
-  let fromY = end.y;
-  if (leader.shape === "elbow") {
-    const midX = leader.x + (end.x - leader.x) * 0.58;
-    fromX = midX;
-    fromY = leader.y;
-    points = [[leader.x, leader.y], [midX, leader.y], [midX, end.y], [end.x, end.y]];
-  } else {
-    points = [[leader.x, leader.y], [end.x, end.y]];
-  }
-  let dash = "";
-  if (leader.style === "dash") dash = ` stroke-dasharray="${leader.width * 5},${leader.width * 3}"`;
-  else if (leader.style === "dot") dash = ` stroke-dasharray="${leader.width},${leader.width * 3}"`;
-  const parts = [`<polyline points="${points.map((p) => `${Math.round(p[0])},${Math.round(p[1])}`).join(" ")}" fill="none" stroke="#111111" stroke-width="${leader.width}" stroke-linecap="round" stroke-linejoin="round"${dash}/>`];
-  if (leader.arrow) {
-    const angle = Math.atan2(leader.y - fromY, leader.x - fromX);
-    const size = Number.isFinite(leader.arrowSize) ? leader.arrowSize : 12;
-    const spread = 0.42;
-    const back = angle + Math.PI;
-    const p1x = leader.x + Math.cos(back - spread) * size;
-    const p1y = leader.y + Math.sin(back - spread) * size;
-    const p2x = leader.x + Math.cos(back + spread) * size;
-    const p2y = leader.y + Math.sin(back + spread) * size;
-    if (leader.arrowShape === "open") {
-      parts.push(`<polyline points="${p1x.toFixed(1)},${p1y.toFixed(1)} ${leader.x},${leader.y} ${p2x.toFixed(1)},${p2y.toFixed(1)}" fill="none" stroke="#111111" stroke-width="${Math.max(1.4, leader.width)}" stroke-linecap="round" stroke-linejoin="round"/>`);
-    } else {
-      parts.push(`<polygon points="${leader.x},${leader.y} ${p1x.toFixed(1)},${p1y.toFixed(1)} ${p2x.toFixed(1)},${p2y.toFixed(1)}" fill="#111111"/>`);
-    }
-  }
-  return parts.join("");
-}
-
-function labelToSvg(label) {
-  const bounds = labelBounds(label);
-  const parts = [];
-  if (label.background !== "none") {
-    const bg = label.background === "gray" ? "#eeeeee" : "#ffffff";
-    parts.push(`<rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="${bg}" stroke="#111111" stroke-width="1"/>`);
-  }
-  const textX = bounds.x + bounds.padding;
-  const textY = bounds.y + bounds.padding;
-  const base = label.fontSize;
-  const tspans = bounds.layout.runs.filter((run) => run.text).map((run) => {
-    const x = (textX + run.dx).toFixed(1);
-    const y = (textY + run.dy + run.size * 0.8).toFixed(1);
-    return `<tspan x="${x}" y="${y}" font-size="${run.size}">${svgEscape(run.text)}</tspan>`;
-  }).join("");
-  const family = svgEscape(label.fontFamily || "Batang, serif");
-  const weight = label.bold ? "700" : "400";
-  const fontStyle = label.italic ? "italic" : "normal";
-  const outline = label.outline
-    ? ` stroke="${label.color === "#ffffff" ? "#111111" : "#ffffff"}" stroke-width="${Math.max(3, Math.round(base * 0.13))}" paint-order="stroke" stroke-linejoin="round"`
-    : "";
-  parts.push(`<text font-family="${family}" font-weight="${weight}" font-style="${fontStyle}" fill="${label.color}"${outline}>${tspans}</text>`);
-  if (label.underline) {
-    const gap = Math.max(3, Math.round(base * 0.14));
-    const uy = textY + Math.round(base * 1.02) + gap;
-    const lw = Math.max(1.2, Math.round(base * 0.075));
-    parts.push(`<line x1="${(textX - 1).toFixed(1)}" y1="${uy}" x2="${(textX + bounds.textWidth + 1).toFixed(1)}" y2="${uy}" stroke="${label.color}" stroke-width="${lw}"/>`);
-  }
-  return parts.join("");
-}
-
-function buildSvg() {
-  const w = state.image.naturalWidth;
-  const h = state.image.naturalHeight;
-  const parts = [`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`];
-  parts.push(`<image x="0" y="0" width="${w}" height="${h}" preserveAspectRatio="none" xlink:href="${state.imageDataUrl}" href="${state.imageDataUrl}"/>`);
-  for (const shape of state.shapes) parts.push(shapeToSvg(shape));
-  for (const label of state.labels) {
-    const leader = leaderToSvg(label);
-    if (leader) parts.push(leader);
-  }
-  for (const label of state.labels) parts.push(labelToSvg(label));
-  parts.push("</svg>");
-  return parts.join("\n");
-}
-
-async function saveSvg() {
-  if (!requireImage()) return;
-  const svg = buildSvg();
-  const dataUrl = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
-  const base = safeBaseName();
-  const saved = await window.labeler.saveDataUrl({
-    dataUrl,
-    defaultName: `${base}_labeled.svg`,
-    imagePath: state.imagePath,
-    projectPath: state.projectPath,
-    title: "SVG 저장",
-    filters: [{ name: "SVG", extensions: ["svg"] }]
-  });
-  if (saved) {
-    setStatus(`SVG 저장 완료: ${saved}`);
-    showToast("SVG 저장 완료 — PPT에 넣고 그룹 해제하면 요소별로 편집됩니다.");
-  }
-}
-
 async function readDroppedFile(file) {
   if (!file) return;
   const filePath = window.labeler.getPathForFile(file);
@@ -1845,7 +1775,11 @@ async function readDroppedFile(file) {
     const opened = await window.labeler.openFilePath(filePath);
     if (!opened) return;
     if (opened.text) {
-      loadProject(JSON.parse(opened.text), opened.filePath);
+      try {
+        loadProject(JSON.parse(opened.text), opened.filePath);
+      } catch (_error) {
+        showToast("프로젝트 파일이 손상되어 열 수 없습니다.");
+      }
       return;
     }
     loadImageData(opened.dataUrl, opened.fileName, opened.filePath);
@@ -1853,7 +1787,13 @@ async function readDroppedFile(file) {
   }
   if (file.name.toLowerCase().endsWith(".melp")) {
     const reader = new FileReader();
-    reader.onload = () => loadProject(JSON.parse(reader.result), "");
+    reader.onload = () => {
+      try {
+        loadProject(JSON.parse(reader.result), "");
+      } catch (_error) {
+        showToast("프로젝트 파일이 손상되어 열 수 없습니다.");
+      }
+    };
     reader.readAsText(file, "utf-8");
     return;
   }
@@ -2022,7 +1962,6 @@ els.saveProjectBtn.addEventListener("click", async () => {
 });
 
 els.saveImageBtn.addEventListener("click", saveImage);
-els.saveSvgBtn.addEventListener("click", saveSvg);
 
 els.alignLeft.addEventListener("click", () => alignSelectedLabels("left"));
 els.alignCenterX.addEventListener("click", () => alignSelectedLabels("centerX"));
@@ -2477,7 +2416,7 @@ canvas.addEventListener("pointermove", (event) => {
   if (state.polygonDraft && state.mode === "shape" && state.shapeTool === "polygon") {
     const cursorPoint = getCanvasPoint(event);
     state.polygonDraft.cursor = { x: cursorPoint.x, y: cursorPoint.y };
-    render();
+    scheduleRender();
     showMagnifier(event, cursorPoint);
     return;
   }
@@ -2486,7 +2425,7 @@ canvas.addEventListener("pointermove", (event) => {
 
   if (state.dragging.type === "resize") {
     updateResizeFrameFromPoint(state.dragging.key, point);
-    render();
+    scheduleRender();
     return;
   }
 
@@ -2543,7 +2482,7 @@ canvas.addEventListener("pointermove", (event) => {
       }
     }
     state.dragging.changed = true;
-    render();
+    scheduleRender();
     return;
   }
 
@@ -2565,17 +2504,16 @@ canvas.addEventListener("pointermove", (event) => {
     state.dragging.changed = true;
   }
 
-  render();
+  scheduleRender();
 });
 
 canvas.addEventListener("pointerup", (event) => {
-  const wasMarquee = state.dragging?.type === "marquee";
   if (state.dragging?.type === "new-label") setAddMode(false);
   if (state.dragging?.type === "new-shape") setShapeTool("");
   if (state.dragging?.changed) setDirty(true);
   state.dragging = null;
   hideMagnifier();
-  if (wasMarquee) render();
+  render();
   try {
     canvas.releasePointerCapture(event.pointerId);
   } catch (_error) {
