@@ -1648,22 +1648,24 @@ function hitLeader(point) {
 function showMagnifier(event, point) {
   if (!state.image) return;
   const magnifierCtx = els.magnifierCanvas.getContext("2d", { willReadFrequently: true });
-  const sourceSize = 80;
-  const half = sourceSize / 2;
-  const sx = Math.max(0, Math.min(canvas.width - sourceSize, Math.round(point.x - half)));
-  const sy = Math.max(0, Math.min(canvas.height - sourceSize, Math.round(point.y - half)));
+  const sourceW = 80;
+  const sourceH = Math.round(sourceW * 0.625);
+  const sx = Math.max(0, Math.min(canvas.width - sourceW, Math.round(point.x - sourceW / 2)));
+  const sy = Math.max(0, Math.min(canvas.height - sourceH, Math.round(point.y - sourceH / 2)));
 
   magnifierCtx.imageSmoothingEnabled = false;
   magnifierCtx.clearRect(0, 0, els.magnifierCanvas.width, els.magnifierCanvas.height);
-  magnifierCtx.drawImage(canvas, sx, sy, sourceSize, Math.round(sourceSize * 0.625), 0, 0, els.magnifierCanvas.width, els.magnifierCanvas.height);
+  magnifierCtx.drawImage(canvas, sx, sy, sourceW, sourceH, 0, 0, els.magnifierCanvas.width, els.magnifierCanvas.height);
 
+  const crossX = ((point.x - sx) / sourceW) * els.magnifierCanvas.width;
+  const crossY = ((point.y - sy) / sourceH) * els.magnifierCanvas.height;
   magnifierCtx.strokeStyle = "#2b8cff";
   magnifierCtx.lineWidth = 2;
   magnifierCtx.beginPath();
-  magnifierCtx.moveTo(els.magnifierCanvas.width / 2, 0);
-  magnifierCtx.lineTo(els.magnifierCanvas.width / 2, els.magnifierCanvas.height);
-  magnifierCtx.moveTo(0, els.magnifierCanvas.height / 2);
-  magnifierCtx.lineTo(els.magnifierCanvas.width, els.magnifierCanvas.height / 2);
+  magnifierCtx.moveTo(crossX, 0);
+  magnifierCtx.lineTo(crossX, els.magnifierCanvas.height);
+  magnifierCtx.moveTo(0, crossY);
+  magnifierCtx.lineTo(els.magnifierCanvas.width, crossY);
   magnifierCtx.stroke();
 
   let colorText = "";
