@@ -3009,7 +3009,8 @@ document.addEventListener("keydown", (event) => {
     deleteSelected();
   }
 
-  if (!typing && event.key.startsWith("Arrow")) {
+  if (!typing && event.key.startsWith("Arrow") && selectionCount() > 0) {
+    event.preventDefault();
     const step = event.shiftKey ? 10 : 1;
     if (event.key === "ArrowLeft") moveSelected(-step, 0);
     if (event.key === "ArrowRight") moveSelected(step, 0);
