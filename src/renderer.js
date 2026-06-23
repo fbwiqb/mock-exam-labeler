@@ -578,6 +578,174 @@ function drawMarquee(context) {
   context.restore();
 }
 
+function selectionBounds() {
+  const labels = selectedLabels();
+  const shapes = selectedShapes();
+  if (!labels.length && !shapes.length) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const label of labels) {
+    const b = labelBounds(label);
+    minX = Math.min(minX, b.x);
+    minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.width);
+    maxY = Math.max(maxY, b.y + b.height);
+  }
+  for (const shape of shapes) {
+    const r = normalizedShapeRect(shape);
+    minX = Math.min(minX, r.x);
+    minY = Math.min(minY, r.y);
+    maxX = Math.max(maxX, r.x + r.width);
+    maxY = Math.max(maxY, r.y + r.height);
+  }
+  if (!Number.isFinite(minX)) return null;
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+function canResizeSelection() {
+  if (state.mode !== "select") return false;
+  if (!(selectedShapes().length > 0 || selectionCount() >= 2)) return false;
+  return !!selectionBounds();
+}
+
+function objectResizeHandles() {
+  const b = selectionBounds();
+  if (!b) return [];
+  const x0 = b.x;
+  const y0 = b.y;
+  const x1 = b.x + b.width;
+  const y1 = b.y + b.height;
+  const mx = (x0 + x1) / 2;
+  const my = (y0 + y1) / 2;
+  return [
+    { key: "nw", x: x0, y: y0 },
+    { key: "n", x: mx, y: y0 },
+    { key: "ne", x: x1, y: y0 },
+    { key: "w", x: x0, y: my },
+    { key: "e", x: x1, y: my },
+    { key: "sw", x: x0, y: y1 },
+    { key: "s", x: mx, y: y1 },
+    { key: "se", x: x1, y: y1 }
+  ];
+}
+
+function hitObjectResizeHandle(point) {
+  if (!canResizeSelection()) return null;
+  const dist = 12 / Math.max(state.zoom, 0.001);
+  for (const handle of objectResizeHandles()) {
+    if (Math.abs(point.x - handle.x) <= dist && Math.abs(point.y - handle.y) <= dist) return handle.key;
+  }
+  return null;
+}
+
+function resizeCursorFor(key) {
+  const map = { n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize", nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize" };
+  return map[key] || "";
+}
+
+function drawSelectionResizeHandles(context) {
+  if (state.dragging && state.dragging.type !== "object-resize") return;
+  if (!canResizeSelection()) return;
+  const b = selectionBounds();
+  const s = 1 / Math.max(state.zoom, 0.001);
+  context.save();
+  context.strokeStyle = "#1f4c8f";
+  context.lineWidth = 1 * s;
+  context.setLineDash([5 * s, 3 * s]);
+  context.strokeRect(b.x, b.y, b.width, b.height);
+  context.setLineDash([]);
+  const hs = 5 * s;
+  for (const handle of objectResizeHandles()) {
+    context.fillStyle = "#ffffff";
+    context.strokeStyle = "#1f4c8f";
+    context.lineWidth = 1.5 * s;
+    context.fillRect(handle.x - hs, handle.y - hs, hs * 2, hs * 2);
+    context.strokeRect(handle.x - hs, handle.y - hs, hs * 2, hs * 2);
+  }
+  context.restore();
+}
+
+function snapshotShapeGeom(shape) {
+  if (shape.kind === "polygon") {
+    return { id: shape.id, kind: "polygon", points: shape.points.map((p) => ({ x: p.x, y: p.y })) };
+  }
+  return { id: shape.id, kind: shape.kind, x: shape.x, y: shape.y, width: shape.width, height: shape.height };
+}
+
+function snapshotLabelGeom(label) {
+  const leader = label.leader && label.leader.enabled ? { x: label.leader.x, y: label.leader.y } : null;
+  return { id: label.id, x: label.x, y: label.y, fontSize: label.fontSize, leader };
+}
+
+function applyObjectResize(point, lockAspect) {
+  const drag = state.dragging;
+  const b = drag.bounds;
+  const key = drag.key;
+  const hasW = key.includes("w");
+  const hasE = key.includes("e");
+  const hasN = key.includes("n");
+  const hasS = key.includes("s");
+  const anchorX = hasW ? b.x + b.width : b.x;
+  const anchorY = hasN ? b.y + b.height : b.y;
+  const minSize = 8;
+  let sx = 1;
+  let sy = 1;
+  if (b.width >= 1) {
+    if (hasE) sx = Math.max(minSize, point.x - b.x) / b.width;
+    else if (hasW) sx = Math.max(minSize, b.x + b.width - point.x) / b.width;
+  }
+  if (b.height >= 1) {
+    if (hasS) sy = Math.max(minSize, point.y - b.y) / b.height;
+    else if (hasN) sy = Math.max(minSize, b.y + b.height - point.y) / b.height;
+  }
+  const isCorner = (hasW || hasE) && (hasN || hasS);
+  if (lockAspect && isCorner) {
+    const uniform = Math.abs(sx - 1) >= Math.abs(sy - 1) ? sx : sy;
+    sx = uniform;
+    sy = uniform;
+  }
+  for (const snap of drag.shapes) {
+    const shape = state.shapes.find((item) => item.id === snap.id);
+    if (!shape) continue;
+    if (snap.kind === "polygon") {
+      shape.points = snap.points.map((p) => ({
+        x: Math.round(anchorX + (p.x - anchorX) * sx),
+        y: Math.round(anchorY + (p.y - anchorY) * sy)
+      }));
+    } else {
+      const x2 = snap.x + snap.width;
+      const y2 = snap.y + snap.height;
+      const nx1 = anchorX + (snap.x - anchorX) * sx;
+      const ny1 = anchorY + (snap.y - anchorY) * sy;
+      const nx2 = anchorX + (x2 - anchorX) * sx;
+      const ny2 = anchorY + (y2 - anchorY) * sy;
+      shape.x = Math.round(nx1);
+      shape.y = Math.round(ny1);
+      shape.width = Math.round(nx2 - nx1);
+      shape.height = Math.round(ny2 - ny1);
+    }
+  }
+  for (const snap of drag.labels) {
+    const label = state.labels.find((item) => item.id === snap.id);
+    if (!label) continue;
+    label.x = Math.round(anchorX + (snap.x - anchorX) * sx);
+    label.y = Math.round(anchorY + (snap.y - anchorY) * sy);
+    const fontScale = isCorner ? Math.sqrt(Math.abs(sx * sy)) : (sx !== 1 ? sx : sy);
+    label.fontSize = Math.max(6, Math.round(snap.fontSize * fontScale));
+    if (snap.leader) {
+      label.leader = {
+        ...normalizedLeader(label),
+        enabled: true,
+        x: Math.round(anchorX + (snap.leader.x - anchorX) * sx),
+        y: Math.round(anchorY + (snap.leader.y - anchorY) * sy)
+      };
+    }
+  }
+  drag.changed = true;
+}
+
 function quoteFontFamily(font) {
   const value = String(font || "").trim();
   if (!value) return "Batang, serif";
@@ -1440,6 +1608,7 @@ function render() {
   drawTo(canvas, { includeSelection: true });
   drawPolygonDraft(ctx);
   drawMarquee(ctx);
+  drawSelectionResizeHandles(ctx);
   updateAlignToolbar();
   updateLabelList();
   updateInspector();
@@ -2729,6 +2898,21 @@ canvas.addEventListener("pointerdown", (event) => {
     return;
   }
 
+  const resizeKey = hitObjectResizeHandle(point);
+  if (resizeKey) {
+    pushHistory();
+    state.dragging = {
+      type: "object-resize",
+      key: resizeKey,
+      bounds: selectionBounds(),
+      shapes: selectedShapes().map(snapshotShapeGeom),
+      labels: selectedLabels().map(snapshotLabelGeom),
+      changed: false
+    };
+    canvas.setPointerCapture(event.pointerId);
+    return;
+  }
+
   const additive = event.ctrlKey || event.shiftKey || event.metaKey;
 
   const leaderHit = hitLeader(point);
@@ -2806,11 +2990,23 @@ canvas.addEventListener("pointermove", (event) => {
     showMagnifier(event, cursorPoint);
     return;
   }
-  if (!state.dragging) return;
+  if (!state.dragging) {
+    if (state.mode === "select") {
+      const hoverKey = hitObjectResizeHandle(getCanvasPoint(event));
+      canvas.style.cursor = hoverKey ? resizeCursorFor(hoverKey) : "";
+    }
+    return;
+  }
   const point = getCanvasPoint(event);
 
   if (state.dragging.type === "resize") {
     updateResizeFrameFromPoint(state.dragging.key, point);
+    scheduleRender();
+    return;
+  }
+
+  if (state.dragging.type === "object-resize") {
+    applyObjectResize(point, event.shiftKey);
     scheduleRender();
     return;
   }
