@@ -2193,6 +2193,7 @@ function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "", ini
     loadSvgPieces(dataUrl, fileName, filePath);
     return;
   }
+  if (state.dirty && !window.confirm("저장하지 않은 변경사항이 있습니다. 새 파일을 열까요?")) return;
   const image = new Image();
   image.onload = () => {
     state.image = image;
@@ -2223,6 +2224,7 @@ function loadImageData(dataUrl, fileName = "mock-exam-image", filePath = "", ini
 
 async function loadProject(project, filePath = "") {
   if (!project || !project.imageDataUrl) return;
+  if (state.dirty && !window.confirm("저장하지 않은 변경사항이 있습니다. 새 파일을 열까요?")) return;
   const image = new Image();
   image.onload = () => {
     state.image = image;
