@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require("electron");
 const { execFile } = require("child_process");
 const { autoUpdater } = require("electron-updater");
 const fs = require("fs/promises");
@@ -115,6 +115,10 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, "../src/index.html"));
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: "deny" };
+  });
   mainWindow.webContents.once("did-finish-load", () => {
     if (pendingProjectPath) {
       sendProjectToWindow(pendingProjectPath);
